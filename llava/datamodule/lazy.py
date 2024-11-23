@@ -810,6 +810,7 @@ class LazySupervisedDataset(Dataset):
         for attempt_idx in range(num_base_retries):
             try:
                 sample = self._get_item(i)
+                print(f"[{i}-th sample which is video: {self.list_data_dict[i]['video']} is used after {attempt_idx} attempt.]")
                 return sample
             except Exception as e:
                 # sleep 1s in case it is a cloud disk issue
@@ -822,6 +823,7 @@ class LazySupervisedDataset(Dataset):
                 next_index = min(i + 1, len(self.list_data_dict) - 1)
                 # sample_idx = random.choice(range(len(self)))
                 sample = self._get_item(next_index)
+                print(f"Another sample: [{next_index}-th sample which is video: {self.list_data_dict[next_index]['video']} is used after {attempt_idx} attempt.]")
                 return sample
             except Exception as e:
                 # no need to sleep
@@ -899,7 +901,7 @@ class LazySupervisedDataset(Dataset):
                 processor = self.data_args.image_processor
                 image = processor.preprocess(video, return_tensors="pt")["pixel_values"]
                 if self.data_args.add_time_instruction:
-                    time_instruciton = f"The video lasts for {video_time:.2f} seconds, and {num_frames_to_sample} frames are uniformly sampled from it. These frames are located at {frame_time}.Please answer the following questions related to this video."
+                    time_instruciton = f"The video lasts for {video_time:.2f} seconds, and {num_frames_to_sample} frames are uniformly sampled from it. These frames are located at {frame_time}."
                     sources[0]["conversations"][0]["value"] = f'{DEFAULT_IMAGE_TOKEN}\n{time_instruciton}\n{sources[0]["conversations"][0]["value"].replace(DEFAULT_IMAGE_TOKEN, "")}'
                 image = [(image, video[0].size, "video")]
                 sources = preprocess_multimodal(copy.deepcopy([e["conversations"] for e in sources]), self.data_args)

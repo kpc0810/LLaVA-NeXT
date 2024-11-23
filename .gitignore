@@ -2,11 +2,14 @@
 __pycache__
 *.pyc
 *.egg-info
+core.*
 dist
 
 # Log
 *.log
 *.log.*
+slurm_log/
+slurm_error/
 # *.json
 # *.jsonl
 

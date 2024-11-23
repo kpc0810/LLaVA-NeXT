@@ -13,20 +13,13 @@ export HF_HOME="/mnt/bn/${NAS_REGION}/workspace/.cache/huggingface"
 export HF_TOKEN="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"
 export HF_HUB_ENABLE_HF_TRANSFER="1"
 
-# DIR="/mnt/bn/vl-research/workspace/yhzhang/LLaVA-NeXT/llava.egg-info/"
-# # Delete dir if exists
-# if [ -d "$DIR" ]; then
-#   rm -rf $DIR
-# fi
-
-
 ############### Prepare Envs #################
-cd /mnt/bn/vl-research/workspace/yhzhang/LLaVA-NeXT/
-python3 -m pip install --upgrade pip
-python3 -m pip install -e ".[train]"
+# cd /mnt/bn/vl-research/workspace/yhzhang/LLaVA-NeXT/
+# python3 -m pip install --upgrade pip
+# python3 -m pip install -e ".[train]"
 
-python3 -m pip install ninja
-python3 -m pip install flash-attn --no-build-isolation
+# python3 -m pip install ninja
+# python3 -m pip install flash-attn --no-build-isolation
 alias python=python3
 ############### Show Envs ####################
 
@@ -58,7 +51,7 @@ wandb online
 
 ################ Arnold Jobs ################
 
-LLM_VERSION="Qwen/Qwen2-7B-Instruct"
+LLM_VERSION="Qwen/Qwen2-72B-Instruct"
 LLM_VERSION_CLEAN="${LLM_VERSION//\//_}"
 VISION_MODEL_VERSION="google/siglip-so400m-patch14-384"
 VISION_MODEL_VERSION_CLEAN="${VISION_MODEL_VERSION//\//_}"
@@ -67,13 +60,13 @@ PROMPT_VERSION=plain
 PRETRAIN_DATA_VERSION="blip558k"
 ############### Pretrain ################
 
-BASE_RUN_NAME="llavanext-google_siglip-so400m-patch14-384-Qwen_Qwen2-7B-Instruct-mlp2x_gelu-pretrain_blip558k_plain"
+BASE_RUN_NAME="llavanext-google_siglip-so400m-patch14-384-Qwen_Qwen2-72B-Instruct-mlp2x_gelu-pretrain_blip558k_plain"
 echo "BASE_RUN_NAME: ${BASE_RUN_NAME}"
 
 # Stage 2
 PROMPT_VERSION="qwen_1_5"
-MID_RUN_NAME="llavanext-${VISION_MODEL_VERSION_CLEAN}-${LLM_VERSION_CLEAN}-ov_to_video_am9_aug17"
-PREV_STAGE_CHECKPOINT="/mnt/bn/vl-research/checkpoints/onevision/llavanext-google_siglip-so400m-patch14-384-Qwen_Qwen2-7B-Instruct-mid_to_final_next_2p4m_am9"
+MID_RUN_NAME="llavanext-${VISION_MODEL_VERSION_CLEAN}-${LLM_VERSION_CLEAN}-ov_to_video_am9_aug16_faster"
+PREV_STAGE_CHECKPOINT="/mnt/bn/vl-research/checkpoints/onevision/llavanext-google_siglip-so400m-patch14-384-Qwen_Qwen2-72B-Instruct-final_to_ov_am9_july31v4/checkpoint-9000"
 echo "PREV_STAGE_CHECKPOINT: ${PREV_STAGE_CHECKPOINT}"
 echo "MID_RUN_NAME: ${MID_RUN_NAME}"
 
@@ -83,6 +76,7 @@ echo "MID_RUN_NAME: ${MID_RUN_NAME}"
 # # "mm_vision_tower,mm_mlp_adapter,mm_language_model" \
 
 # ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${ARNOLD_WORKER_GPU}" --nnodes="${ARNOLD_WORKER_NUM}" --node_rank="${ARNOLD_ID}" --master_addr="${METIS_WORKER_0_HOST}" --master_port="${port_in_cmd}" \
+# /mnt/bn/vl-research/workspace/boli01/projects/LLaVA_Next/scripts/i18n/scale_llms/next_ov_video_specific_stage_aug12.yaml \
 ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${ARNOLD_WORKER_GPU}" --nnodes="${ARNOLD_WORKER_NUM}" --node_rank="${ARNOLD_ID}" --master_addr="${METIS_WORKER_0_HOST}" --master_port="${port_in_cmd}" \
     llava/train/train_mem.py \
     --deepspeed scripts/zero3.json \
@@ -119,7 +113,7 @@ ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${ARNOLD_WORKER_GPU}" --nno
     --lr_scheduler_type "cosine" \
     --logging_steps 1 \
     --tf32 True \
-    --model_max_length 22768 \
+    --model_max_length 32768 \
     --gradient_checkpointing True \
     --dataloader_num_workers 2 \
     --lazy_preprocess True \
@@ -127,10 +121,11 @@ ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${ARNOLD_WORKER_GPU}" --nno
     --torch_compile True \
     --torch_compile_backend "inductor" \
     --dataloader_drop_last True \
-    --frames_upbound 110 \
+    --frames_upbound 64 \
     --mm_newline_position grid \
     --add_time_instruction True \
     --force_sample True \
+    --add_faster_video True \
+    --faster_token_stride 5 \
     --mm_spatial_pool_stride 2
-
 exit 0;

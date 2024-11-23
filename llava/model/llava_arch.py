@@ -169,6 +169,7 @@ class LlavaMetaForCausalLM(ABC):
         return self.get_model().get_vision_tower()
 
     def get_2dPool(self, image_feature, stride=2):
+        # import pdb; pdb.set_trace()
         height = width = self.get_vision_tower().num_patches_per_side
         num_frames, num_tokens, num_dim = image_feature.shape
         image_feature = image_feature.view(num_frames, height, width, -1)
@@ -185,14 +186,15 @@ class LlavaMetaForCausalLM(ABC):
 
         else:
             raise ValueError(f"Unexpected mm_spatial_pool_mode: {self.config.mm_spatial_pool_mode}")
+        # import pdb; pdb.set_trace()
         image_feature = image_feature.permute(0, 2, 3, 1)
         image_feature = image_feature.view(num_frames, -1, num_dim)
         return image_feature
 
     def encode_images(self, images):
-        image_features = self.get_model().get_vision_tower()(images)
+        image_features = self.get_model().get_vision_tower()(images)  # shape = (bs * num_frames, patch * patch = 27*27, dim=1152)
         # image_features = self.get_model().vision_resampler(image_features, images=images)
-        image_features = self.get_model().mm_projector(image_features)
+        image_features = self.get_model().mm_projector(image_features)  # shape = (bs * num_frames, patch * patch = 27*27, dim=3584)
         return image_features
     
     def encode_multimodals(self, videos_or_images, video_idx_in_batch, split_sizes=None):
@@ -220,6 +222,7 @@ class LlavaMetaForCausalLM(ABC):
         return all_videos_or_images_features,all_faster_video_features
 
     def add_token_per_grid(self, image_feature):
+        # import pdb; pdb.set_trace()
         resize_h = int(math.sqrt(image_feature.shape[1]))
         num_frames = image_feature.shape[0]
         feature_dim = image_feature.shape[-1]
@@ -240,6 +243,7 @@ class LlavaMetaForCausalLM(ABC):
             return image_feature
         # import pdb; pdb.set_trace()
         image_feature = image_feature.flatten(1, 2).transpose(0, 1)
+        # import pdb; pdb.set_trace()
         return image_feature
 
     def add_token_per_frame(self, image_feature):
@@ -274,7 +278,7 @@ class LlavaMetaForCausalLM(ABC):
                 else:
                     images_list.append(image.unsqueeze(0))
 
-            concat_images = torch.cat([image for image in images_list], dim=0)
+            concat_images = torch.cat([image for image in images_list], dim=0)  # shape = (num_frames, 3, 384, 384)
             split_sizes = [image.shape[0] for image in images_list]
             encoded_image_features = self.encode_images(concat_images)
             # image_features,all_faster_video_features = self.encode_multimodals(concat_images, video_idx_in_batch, split_sizes)
@@ -300,7 +304,7 @@ class LlavaMetaForCausalLM(ABC):
 
             elif mm_patch_merge_type.startswith("spatial"):
                 new_image_features = []
-                for image_idx, image_feature in enumerate(image_features):
+                for image_idx, image_feature in enumerate(image_features):  # shape of image_feature = (frame_num, num_patches, dim)
                     # FIXME: now assume the image is square, and split to 2x2 patches
                     # num_patches = h * w, where h = w = sqrt(num_patches)
                     # currently image_feature is a tensor of shape (4, num_patches, hidden_size)
@@ -450,14 +454,16 @@ class LlavaMetaForCausalLM(ABC):
             num_images = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
             # rank0_print(num_images)
             if num_images == 0:
-                cur_image_features = image_features[cur_image_idx]
+                cur_image_features = image_features[cur_image_idx]  # note that image_features (List[torch.FloatTensor]) = (bs, (num_frames*patch_num^(1/2)*(patch_num^(1/2)+1))) 
                 cur_input_embeds_1 = self.get_model().embed_tokens(cur_input_ids)
                 cur_input_embeds = torch.cat([cur_input_embeds_1, cur_image_features[0:0]], dim=0)
                 new_input_embeds.append(cur_input_embeds)
                 new_labels.append(labels[batch_idx])
                 cur_image_idx += 1
                 continue
-
+            
+            ## Create (1) cur_input_ids_noim, (2) cur_labels_noim, (3) cur_input_embeds_no_im (no image tokens),
+            ## which are in the format of list of tensors (split by image tokens)
             image_token_indices = [-1] + torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist() + [cur_input_ids.shape[0]]
             cur_input_ids_noim = []
             cur_labels = labels[batch_idx]
@@ -468,6 +474,9 @@ class LlavaMetaForCausalLM(ABC):
             split_sizes = [x.shape[0] for x in cur_labels_noim]
             cur_input_embeds = self.get_model().embed_tokens(torch.cat(cur_input_ids_noim))
             cur_input_embeds_no_im = torch.split(cur_input_embeds, split_sizes, dim=0)
+            
+            ## `cur_new_input_embeds` and `cur_new_labels` are list of tensors (split by image tokens)
+            ## besides, they are interleaved with text and image features
             cur_new_input_embeds = []
             cur_new_labels = []
 

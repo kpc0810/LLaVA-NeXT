@@ -182,8 +182,13 @@ def smart_tokenizer_and_embedding_resize(
 
 def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, data_args) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
-    train_dataset = LazySupervisedDataset(tokenizer=tokenizer, data_path=data_args.data_path, data_args=data_args)
-    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
+    if "mira" in data_args.data_path:
+        train_dataset = MiraLazySupervisedDataset(tokenizer=tokenizer, data_path=data_args.data_path, data_args=data_args)
+        data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
+        
+    else:
+        train_dataset = LazySupervisedDataset(tokenizer=tokenizer, data_path=data_args.data_path, data_args=data_args)
+        data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
     return dict(train_dataset=train_dataset, eval_dataset=None, data_collator=data_collator)
 
 

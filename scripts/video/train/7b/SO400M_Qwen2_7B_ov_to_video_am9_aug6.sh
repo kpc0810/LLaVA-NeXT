@@ -9,17 +9,24 @@ export WANDB_MODE=online
 export PYTHONWARNINGS="ignore"
 
 export ACCELERATE_DEBUG_MODE="1"
-export HF_HOME="/mnt/bn/${NAS_REGION}/workspace/.cache/huggingface"
-export HF_TOKEN="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"
+# export HF_HOME="/mnt/bn/${NAS_REGION}/workspace/.cache/huggingface"
+# export HF_TOKEN="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"
 export HF_HUB_ENABLE_HF_TRANSFER="1"
 
-############### Prepare Envs #################
-cd /mnt/bn/vl-research/workspace/yhzhang/LLaVA-NeXT/
-python3 -m pip install --upgrade pip
-python3 -m pip install -e ".[train]"
+# DIR="/mnt/bn/vl-research/workspace/yhzhang/LLaVA-NeXT/llava.egg-info/"
+# # Delete dir if exists
+# if [ -d "$DIR" ]; then
+#   rm -rf $DIR
+# fi
 
-python3 -m pip install ninja
-python3 -m pip install flash-attn --no-build-isolation
+
+############### Prepare Envs #################
+# cd /mnt/bn/vl-research/workspace/yhzhang/LLaVA-NeXT/
+# python3 -m pip install --upgrade pip
+# python3 -m pip install -e ".[train]"
+
+# python3 -m pip install ninja
+# python3 -m pip install flash-attn --no-build-isolation
 alias python=python3
 ############### Show Envs ####################
 
@@ -46,8 +53,8 @@ export NCCL_DEBUG=WARN
 PORT=26000
 GPUS="0,1,2,3,4,5,6,7"
 
-wandb login a651c244635bc6f913ab654af3f0eebaecdc9381
-wandb online
+# wandb login a651c244635bc6f913ab654af3f0eebaecdc9381
+# wandb online
 
 ################ Arnold Jobs ################
 
@@ -65,7 +72,7 @@ echo "BASE_RUN_NAME: ${BASE_RUN_NAME}"
 
 # Stage 2
 PROMPT_VERSION="qwen_1_5"
-MID_RUN_NAME="llavanext-${VISION_MODEL_VERSION_CLEAN}-${LLM_VERSION_CLEAN}-ov_to_video_am9_aug16_faster"
+MID_RUN_NAME="llavanext-${VISION_MODEL_VERSION_CLEAN}-${LLM_VERSION_CLEAN}-ov_to_video_am9_aug17"
 PREV_STAGE_CHECKPOINT="/mnt/bn/vl-research/checkpoints/onevision/llavanext-google_siglip-so400m-patch14-384-Qwen_Qwen2-7B-Instruct-mid_to_final_next_2p4m_am9"
 echo "PREV_STAGE_CHECKPOINT: ${PREV_STAGE_CHECKPOINT}"
 echo "MID_RUN_NAME: ${MID_RUN_NAME}"
@@ -76,18 +83,27 @@ echo "MID_RUN_NAME: ${MID_RUN_NAME}"
 # # "mm_vision_tower,mm_mlp_adapter,mm_language_model" \
 
 # ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${ARNOLD_WORKER_GPU}" --nnodes="${ARNOLD_WORKER_NUM}" --node_rank="${ARNOLD_ID}" --master_addr="${METIS_WORKER_0_HOST}" --master_port="${port_in_cmd}" \
-# /mnt/bn/vl-research/workspace/boli01/projects/LLaVA_Next/scripts/i18n/scale_llms/next_ov_video_specific_stage_aug12.yaml \
-# #/mnt/bn/vl-research/workspace/boli01/projects/LLaVA_Next/scripts/i18n/scale_llms/next_ov_video_specific_stage_july31.yaml
+# params
+n_node=1
+nproc_per_node=1
+output_dir="/home/kaipoc/personal/research_vh/LLaVA-NeXT/checkpoints/exps/debug"
 
-deepspeed --master_port 30000 \
+
+echo "total workers: ${n_node}"
+echo "gpus per worker: ${nproc_per_node}"
+echo "master ip: ${master_addr}"
+echo "master port: ${port}"
+
+# ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${ARNOLD_WORKER_GPU}" --nnodes="${ARNOLD_WORKER_NUM}" --node_rank="${ARNOLD_ID}" --master_addr="${METIS_WORKER_0_HOST}" --master_port="${port_in_cmd}" \
+torchrun --nproc_per_node="${nproc_per_node}" --nnodes="${n_node}" --node_rank="${CURRENT_RANK}" --master_addr="${master_addr}" --master_port="${port}" \
     llava/train/train_mem.py \
     --deepspeed scripts/zero3.json \
     --model_name_or_path $PREV_STAGE_CHECKPOINT \
     --version $PROMPT_VERSION \
-    --data_path /mnt/bn/vl-research/workspace/boli01/projects/LLaVA_Next/scripts/i18n/scale_llms/next_ov_video_specific_stage_aug17.yaml \
+    --data_path /mnt/bn/vl-research/workspace/boli01/projects/LLaVA_Next/scripts/i18n/scale_llms/next_ov_video_specific_stage_july31.yaml \
     --image_folder /mnt/bn/vl-research/data/llava_data \
     --video_folder /mnt/bn/tiktok-mm-2/aiic/public/data/video/training \
-    --mm_tunable_parts="mm_mlp_adapter" \
+    --mm_tunable_parts="mm_vision_tower,mm_mlp_adapter,mm_language_model" \
     --mm_vision_tower_lr=2e-6 \
     --vision_tower ${VISION_MODEL_VERSION} \
     --mm_projector_type mlp2x_gelu \
@@ -115,7 +131,7 @@ deepspeed --master_port 30000 \
     --lr_scheduler_type "cosine" \
     --logging_steps 1 \
     --tf32 True \
-    --model_max_length 32768 \
+    --model_max_length 22768 \
     --gradient_checkpointing True \
     --dataloader_num_workers 2 \
     --lazy_preprocess True \
@@ -123,11 +139,10 @@ deepspeed --master_port 30000 \
     --torch_compile True \
     --torch_compile_backend "inductor" \
     --dataloader_drop_last True \
-    --frames_upbound 11 \
+    --frames_upbound 110 \
     --mm_newline_position grid \
     --add_time_instruction True \
     --force_sample True \
-    --add_faster_video True \
-    --faster_token_stride 5 \
     --mm_spatial_pool_stride 2
-# exit 0;
+
+exit 0;
