@@ -22,23 +22,22 @@ alias python=python3
 cd /home/kaipoc/personal/research_vh/LLaVA-NeXT/
 
 ############### Show Envs ####################
-
+ibstat
+ibv_devinfo
 nvidia-smi
 master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 
-export OMP_NUM_THREADS=8
-export NCCL_IB_DISABLE=0
-export NCCL_IB_GID_INDEX=3
-# export NCCL_IB_HCA=${ARNOLD_RDMA_DEVICE}
-export NCCL_SOCKET_IFNAME=eth0
-export NCCL_DEBUG=INFO
-export NCCL_ASYNC_ERROR_HANDLING=1
-export NCCL_SHM_DISABLE=1
+# export OMP_NUM_THREADS=8
+# export NCCL_IB_DISABLE=0
+# export NCCL_IB_GID_INDEX=3
+# export NCCL_IB_TIMEOUT=22
+# export NCCL_SOCKET_IFNAME=eth0
+# export NCCL_DEBUG=INFO
+# export NCCL_ASYNC_ERROR_HANDLING=1
+# export NCCL_SHM_DISABLE=1
 
-port=26667
+port=$(( ( $SLURM_JOB_ID % 10000 ) + 20000 ))
 export WANDB_API_KEY=d4db7112c0ff6ba1e4243f6b406f49ce29ff92ba
-# wandb login
-# wandb online
 
 export MASTER_ADDR=${master_addr:-"127.0.0.1"}
 export CURRENT_RANK=${SLURM_PROCID:-"0"}
@@ -52,10 +51,8 @@ VISION_MODEL_VERSION="google/siglip-so400m-patch14-384"
 VISION_MODEL_VERSION_CLEAN="${VISION_MODEL_VERSION//\//_}"
 
 PROMPT_VERSION="qwen_1_5"
-MID_RUN_NAME="llavanext-${VISION_MODEL_VERSION_CLEAN}-${LLM_VERSION_CLEAN}-ov_to_video_am9_aug17"
 PREV_STAGE_CHECKPOINT="lmms-lab/LLaVA-Video-7B-Qwen2"
 echo "PREV_STAGE_CHECKPOINT: ${PREV_STAGE_CHECKPOINT}"
-echo "MID_RUN_NAME: ${MID_RUN_NAME}"
 
 ################ Noticed Parameters ##############
 output_dir=${1}
@@ -100,8 +97,8 @@ torchrun --nproc_per_node=8 --nnodes="${SLURM_JOB_NUM_NODES}" --node_rank="${CUR
     --gradient_accumulation_steps 2 \
     --evaluation_strategy "no" \
     --save_strategy "steps" \
-    --save_steps 20 \
-    --save_total_limit 20 \
+    --save_steps 40 \
+    --save_total_limit 30 \
     --learning_rate "${plm_lr}" \
     --weight_decay 0. \
     --warmup_ratio 0.03 \
@@ -110,7 +107,7 @@ torchrun --nproc_per_node=8 --nnodes="${SLURM_JOB_NUM_NODES}" --node_rank="${CUR
     --tf32 True \
     --model_max_length 22768 \
     --gradient_checkpointing True \
-    --dataloader_num_workers 128 \
+    --dataloader_num_workers 4 \
     --lazy_preprocess True \
     --report_to wandb \
     --torch_compile True \

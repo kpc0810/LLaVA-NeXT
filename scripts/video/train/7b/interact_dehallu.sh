@@ -1,84 +1,46 @@
 #!/bin/bash
 
 # set up wandb
-export WANDB_API_KEY=d4db7112c0ff6ba1e4243f6b406f49ce29ff92ba
-export WANDB_ENTITY=irving0810
-export WANDB_PROJECT=llava-next
-export WANDB_MODE=online
 export PYTHONWARNINGS="ignore"
-
 export ACCELERATE_DEBUG_MODE="1"
 export HF_TOKEN="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"
 export HF_HUB_ENABLE_HF_TRANSFER="1"
 
-# DIR="/mnt/bn/vl-research/workspace/yhzhang/LLaVA-NeXT/llava.egg-info/"
-# # Delete dir if exists
-# if [ -d "$DIR" ]; then
-#   rm -rf $DIR
-# fi
-
 
 ############### Prepare Envs #################
 cd /home/kaipoc/personal/research_vh/LLaVA-NeXT/
-# python3 -m pip install --upgrade pip
-# python3 -m pip install -e ".[train]"
-
-# python3 -m pip install ninja
-# conda install -c nvidia cuda-toolkit -y
-# python3 -m pip install flash-attn --no-build-isolation
 alias python=python3
-############### Show Envs ####################
 
+############### Show Envs ####################
+ibstat
+ibv_devinfo
 nvidia-smi
 master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 
-export OMP_NUM_THREADS=8
-export NCCL_IB_DISABLE=0
-export NCCL_IB_GID_INDEX=3
-# export NCCL_IB_HCA=${ARNOLD_RDMA_DEVICE}
-export NCCL_SOCKET_IFNAME=eth0
-export NCCL_DEBUG=INFO
-export NCCL_ASYNC_ERROR_HANDLING=1
-export NCCL_SHM_DISABLE=1
-
-port=26667
-export WANDB_API_KEY=d4db7112c0ff6ba1e4243f6b406f49ce29ff92ba
-# wandb login
-# wandb online
-
+port=29999
 export MASTER_ADDR=${master_addr:-"127.0.0.1"}
 export CURRENT_RANK=${SLURM_PROCID:-"0"}
 export HYDRA_FULL_ERROR="1"
 export DECORD_EOF_RETRY_MAX="100000"
-################ Arnold Jobs ################
 
+################ Fixed Parameters ################
 LLM_VERSION="Qwen/Qwen2-7B-Instruct"
 LLM_VERSION_CLEAN="${LLM_VERSION//\//_}"
 VISION_MODEL_VERSION="google/siglip-so400m-patch14-384"
 VISION_MODEL_VERSION_CLEAN="${VISION_MODEL_VERSION//\//_}"
 
-PROMPT_VERSION=plain
-PRETRAIN_DATA_VERSION="blip558k"
-############### Pretrain ################
-
-BASE_RUN_NAME="llavanext-google_siglip-so400m-patch14-384-Qwen_Qwen2-7B-Instruct-mlp2x_gelu-pretrain_blip558k_plain"
-echo "BASE_RUN_NAME: ${BASE_RUN_NAME}"
-
-# Stage 2
 PROMPT_VERSION="qwen_1_5"
-MID_RUN_NAME="llavanext-${VISION_MODEL_VERSION_CLEAN}-${LLM_VERSION_CLEAN}-ov_to_video_am9_aug17"
+run_name="llavavideo-debug"
 PREV_STAGE_CHECKPOINT="lmms-lab/LLaVA-Video-7B-Qwen2"
 echo "PREV_STAGE_CHECKPOINT: ${PREV_STAGE_CHECKPOINT}"
 echo "MID_RUN_NAME: ${MID_RUN_NAME}"
 
-# params
+################ Noticed Parameters ##############
 n_node=1
-nproc_per_node=8
+nproc_per_node=1
 output_dir="/home/kaipoc/personal/research_vh/LLaVA-NeXT/checkpoints/exps/debug"
 
 
-echo "total workers: ${n_node}"
-echo "gpus per worker: ${nproc_per_node}"
 echo "master ip: ${master_addr}"
 echo "master port: ${port}"
 
@@ -86,14 +48,14 @@ echo "master port: ${port}"
 torchrun --nproc_per_node="${nproc_per_node}" --nnodes="${n_node}" --node_rank="${CURRENT_RANK}" --master_addr="${master_addr}" --master_port="${port}" \
     llava/train/train_mem.py \
     --deepspeed scripts/zero3.json \
-    --model_name_or_path $PREV_STAGE_CHECKPOINT \
-    --version $PROMPT_VERSION \
+    --model_name_or_path "$PREV_STAGE_CHECKPOINT" \
+    --version "$PROMPT_VERSION" \
     --data_path /home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/seg_fixed_parsed_data/seg_merged_miradata_84k_train_dataset.csv \
     --image_folder /home/kaipoc/personal/research_vh/NULL \
     --video_folder /home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/video/clip_video \
     --mm_tunable_parts="mm_mlp_adapter" \
     --mm_vision_tower_lr=2e-6 \
-    --vision_tower ${VISION_MODEL_VERSION} \
+    --vision_tower "${VISION_MODEL_VERSION}" \
     --mm_projector_type mlp2x_gelu \
     --mm_vision_select_layer -2 \
     --mm_use_im_start_end False \
@@ -103,8 +65,8 @@ torchrun --nproc_per_node="${nproc_per_node}" --nnodes="${n_node}" --node_rank="
     --image_grid_pinpoints  "(1x1),...,(6x6)" \
     --mm_patch_merge_type spatial_unpad \
     --bf16 True \
-    --run_name $MID_RUN_NAME \
-    --output_dir ${output_dir} \
+    --run_name "${run_name}" \
+    --output_dir "${output_dir}" \
     --num_train_epochs 1 \
     --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 4 \

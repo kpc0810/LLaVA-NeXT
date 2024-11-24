@@ -820,20 +820,21 @@ class LazySupervisedDataset(Dataset):
         # try other samples, in case it is file corruption issue
         for attempt_idx in range(num_base_retries):
             try:
-                next_index = min(i + 1, len(self.list_data_dict) - 1)
-                # sample_idx = random.choice(range(len(self)))
-                sample = self._get_item(next_index)
-                print(f"Another sample: [{next_index}-th sample which is video: {self.list_data_dict[next_index]['video']} is used after {attempt_idx} attempt.]")
+                # next_index = min(i + 1, len(self.list_data_dict) - 1)
+                sample_idx = random.choice(range(len(self)))
+                sample = self._get_item(sample_idx)
+                print(f"Another sample: [{sample_idx}-th sample which is video: {self.list_data_dict[sample_idx]['video']} is used after {attempt_idx} attempt.]")
                 return sample
             except Exception as e:
                 # no need to sleep
-                print(f"[Try other #{attempt_idx}] Failed to fetch sample {next_index}. Exception:", e)
+                print(f"Another sample: [Try other #{attempt_idx}] Failed to fetch sample {sample_idx}. Exception:", e)
                 pass
 
         try:
             sample = self._get_item(i)
             return sample
         except Exception as e:
+            print(f"Many times: [Failed to fetch sample {i}. Exception:", e)
             raise e
 
     def _get_item(self, i) -> Dict[str, torch.Tensor]:
