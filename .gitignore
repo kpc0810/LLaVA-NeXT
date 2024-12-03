@@ -25,6 +25,7 @@ slurm_error/
 wandb
 output
 llavavid
+*.bin
 
 checkpoints
 project_checkpoints

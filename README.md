@@ -90,7 +90,19 @@ cd LLaVA-NeXT
 conda create -n llava python=3.10 -y
 conda activate llava
 pip install --upgrade pip  # Enable PEP 660 support.
+conda install -c nvidia cuda-toolkit -y
 pip install -e ".[train]"
+pip install flash-attn==2.5.7
+pip uninstall accelerate
+pip install accelerate==0.28.0
+
+# pip uninstall transformers
+# # install transformers from github, do the following 4 steps
+# git clone https://github.com/huggingface/transformers.git
+# mv transformers transformer-4.40.0
+# cd transformer-4.40.0
+# git checkout tags/v4.40.0
+# pip install -e .
 ```
 
 ### Project Navigation
