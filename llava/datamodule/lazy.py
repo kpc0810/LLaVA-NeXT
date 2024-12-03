@@ -19,7 +19,7 @@ import transformers
 import tokenizers
 from llava.constants import IGNORE_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN, IMAGE_TOKEN_INDEX
 from llava.mm_utils import process_highres_image, process_anyres_image, process_highres_image_crop_split, tokenizer_image_token
-from llava.utils import rank0_print, process_video_with_decord
+from llava.utils import rank0_print, process_video_with_decord, rank_print
 from llava.args import DataArguments
 from llava import conversation as conversation_lib
 
@@ -810,11 +810,10 @@ class LazySupervisedDataset(Dataset):
         for attempt_idx in range(num_base_retries):
             try:
                 sample = self._get_item(i)
-                print(f"[{i}-th sample which is video: {self.list_data_dict[i]['video']} is used after {attempt_idx} attempt.]")
                 return sample
             except Exception as e:
                 # sleep 1s in case it is a cloud disk issue
-                print(f"[Try #{attempt_idx}] Failed to fetch sample {i}. Exception:", e)
+                rank_print(f"[Try #{attempt_idx}] Failed to fetch sample {i}. Exception:", e)
                 time.sleep(1)
 
         # try other samples, in case it is file corruption issue
@@ -823,18 +822,16 @@ class LazySupervisedDataset(Dataset):
                 # next_index = min(i + 1, len(self.list_data_dict) - 1)
                 sample_idx = random.choice(range(len(self)))
                 sample = self._get_item(sample_idx)
-                print(f"Another sample: [{sample_idx}-th sample which is video: {self.list_data_dict[sample_idx]['video']} is used after {attempt_idx} attempt.]")
                 return sample
             except Exception as e:
                 # no need to sleep
-                print(f"Another sample: [Try other #{attempt_idx}] Failed to fetch sample {sample_idx}. Exception:", e)
                 pass
 
         try:
             sample = self._get_item(i)
             return sample
         except Exception as e:
-            print(f"Many times: [Failed to fetch sample {i}. Exception:", e)
+            rank_print(f"Many times: [Failed to fetch sample {i}. Exception:", e)
             raise e
 
     def _get_item(self, i) -> Dict[str, torch.Tensor]:

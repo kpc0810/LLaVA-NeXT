@@ -6,7 +6,7 @@ import math
 import warnings
 
 from transformers import AutoConfig, AutoModel, PretrainedConfig, PreTrainedModel
-
+from llava.utils import rank0_breakpoint
 
 def _no_grad_trunc_normal_(tensor, mean, std, a, b):
     # Cut & paste from PyTorch official master until it's in a few official releases - RW
@@ -72,12 +72,8 @@ class ContrastiveProjectorConfig(PretrainedConfig):
         super().__init__(**kwargs)
         if config is not None:
             self.in_hidden_size = config.hidden_size  # llm's output hidden size
-            self.out_hidden_size = config.vision_tower_cfg['hidden_size']  # vision tower's output hidden size, follow LM4VisualEncoding (ICLR'24)
-            self.model_dtype = config.model_dtype
-        else:
-            self.in_hidden_size = kwargs.get('in_hidden_size')
-            self.out_hidden_size = kwargs.get('out_hidden_size')
-            self.model_dtype = kwargs.get('model_dtype')
+            self.out_hidden_size = config.mm_hidden_size  # vision tower's output hidden size, follow LM4VisualEncoding (ICLR'24)
+            self.model_dtype = config.torch_dtype
 
 
 class ContrastiveProjector(PreTrainedModel):
@@ -87,25 +83,79 @@ class ContrastiveProjector(PreTrainedModel):
         self, config: PretrainedConfig
     ):
         super().__init__(config)
-        self.norm = nn.LayerNorm(config.in_hidden_size)
-        self.layers = nn.Linear(config.in_hidden_size, config.out_hidden_size)
-        if config.init_weights:
-            self.apply(self._init_weights)
-        
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=.02)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
+        self.config = config
+        self.norm = nn.LayerNorm(config.in_hidden_size)  # TODO: change to RMSNorm
+        self.ffn = nn.Linear(config.in_hidden_size, config.out_hidden_size)  
+        self.apply(self._init_weights)
+    
+    # def _trunc_normal_(tensor, mean, std, a, b):
+    #     # rewrite timm trunc normal
+    #     def norm_cdf(x):
+    #         # Computes standard normal cumulative distribution function
+    #         return (1. + math.erf(x / math.sqrt(2.))) / 2.
+
+    #     if (mean < a - 2 * std) or (mean > b + 2 * std):
+    #         warnings.warn("mean is more than 2 std from [a, b] in nn.init.trunc_normal_. "
+    #                     "The distribution of values may be incorrect.",
+    #                     stacklevel=2)
+
+    #     l = norm_cdf((a - mean) / std)
+    #     u = norm_cdf((b - mean) / std)
+
+    #     # Uniformly fill tensor with values from [l, u], then translate to
+    #     # [2l-1, 2u-1].
+    #     tensor.uniform_(2 * l - 1, 2 * u - 1)
+
+    #     # Use inverse cdf transform for normal distribution to get truncated standard normal
+    #     # tensor.erfinv_() # NOTE: deleted as "erfinv_cuda" not implemented for 'BFloat16'
+
+    #     # Transform to proper mean, std
+    #     tensor.mul_(std * math.sqrt(2.))
+    #     tensor.add_(mean)
+
+    #     # Clamp to ensure it's in the proper range
+    #     tensor.clamp_(min=a, max=b)
+    #     return tensor
+
+    def _init_weights(self, module):
+        """Initialize the weights"""
+        if isinstance(module, nn.Conv2d) or isinstance(module, nn.Embedding) or isinstance(module, nn.Linear):
+            module.weight.data.normal_(mean=0.0, std=0.02)
+            if hasattr(module, "bias") and module.bias is not None:
+                module.bias.data.zero_()
+        if isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
+        elif isinstance(module, nn.Linear) and module.bias is not None:
+            module.bias.data.zero_()
+
+    # def load_pretrained_weights(self, pretrained_model_name_or_path):
+    #     # 載入預訓練模型至 CPU
+    #     pretrained_model = Qwen2Model.from_pretrained(pretrained_model_name_or_path, device_map='cpu')
+
+    #     # 提取嵌入層和 RMSNorm 層的權重
+    #     pretrained_embeddings = pretrained_model.get_input_embeddings().state_dict()
+    #     pretrained_norm = pretrained_model.norm.state_dict()
+
+    #     # 將權重載入到當前模型的對應層
+    #     self.embedding.load_state_dict(pretrained_embeddings)
+    #     self.norm.load_state_dict(pretrained_norm)
+
+    #     # 刪除預訓練模型以釋放記憶體
+    #     del pretrained_model
+    #     torch.cuda.empty_cache()
         
     def forward(self, x, *args, **kwargs):
         x = self.norm(x)
-        output = self.layers(x)
+        output = self.ffn(x)
         return output
 
 
 AutoConfig.register("vl_contrastive_projector", ContrastiveProjectorConfig)
 AutoModel.register(ContrastiveProjectorConfig, ContrastiveProjector)
+
+
+if __name__ == "__main__":
+    config = ContrastiveProjectorConfig()
+    model = ContrastiveProjector(config)
+    print(model)

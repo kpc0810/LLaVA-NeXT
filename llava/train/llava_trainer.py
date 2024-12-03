@@ -1,6 +1,7 @@
 import os
 import torch
 import torch.nn as nn
+from torch.nn import Module
 import datetime
 
 from accelerate import Accelerator
@@ -17,6 +18,12 @@ from transformers.trainer_pt_utils import get_length_grouped_indices as get_leng
 from transformers.trainer_pt_utils import AcceleratorConfig
 from typing import List, Optional
 from datetime import timedelta
+
+from functools import partial
+from typing import Dict
+from llava.model.mixin import MultiTaskModuleMixin
+from llava.train.utils import TrainLoggingState
+from llava.utils import rank0_breakpoint
 
 if is_accelerate_available():
     from accelerate import Accelerator, skip_first_batches, InitProcessGroupKwargs
@@ -192,7 +199,17 @@ def get_modality_length_grouped_indices_auto(lengths, batch_size, world_size, ge
 
     return [i for megabatch in megabatches for i in megabatch]
 
-
+def _patching_module_base(module: Module, training_log_state: TrainLoggingState):
+    if isinstance(
+        module, Module
+    ) and MultiTaskModuleMixin not in module.__class__.__bases__:  # this is a temporal solution, the flag `supports_report_metrics` will be checked in the future to avoid patching each module.
+        module.__class__.__bases__ = module.__class__.__bases__ + (
+            MultiTaskModuleMixin,
+        )
+        module.report_metrics = partial(
+            module.report_metrics, training_log_state
+        )
+        
 class LengthGroupedSampler(Sampler):
     r"""
     Sampler that samples indices in a way that groups together features of the dataset of roughly the same length while
@@ -238,7 +255,43 @@ class LengthGroupedSampler(Sampler):
 
 
 class LLaVATrainer(Trainer):
+    def __init__(self, *args, **kwargs):
+        self.training_log_state = TrainLoggingState(kwargs['args'])
+        model = kwargs['model']
+        if model is not None:
+            patch_report_metrics = partial(
+                _patching_module_base, training_log_state=self.training_log_state
+            )
+            model.apply(patch_report_metrics)
+                
+        super().__init__(*args, **kwargs)
 
+    def log(self, logs: Dict[str, float]) -> None:
+        if self.state.epoch is not None:
+            logs["epoch"] = self.state.epoch
+        if self.args.include_num_input_tokens_seen:
+            logs["num_input_tokens_seen"] = self.state.num_input_tokens_seen
+        if hasattr(self, 'training_log_state'):
+            training_logs = self.training_log_state.pop_metrics(
+                gather_func=self._nested_gather
+            )
+        else:
+            training_logs = {}
+
+        epoch = logs.pop('epoch', None)
+        logs.update(training_logs)
+        logs['epoch'] = epoch
+        output = {
+            **logs,
+            **{
+                "step": self.state.global_step
+            }
+        }
+        self.state.log_history.append(output)
+        self.control = self.callback_handler.on_log(
+            self.args, self.state, self.control, logs
+        )
+        
     def create_accelerator_and_postprocess(self):
         grad_acc_kwargs = {"num_steps": self.args.gradient_accumulation_steps}
         grad_acc_kwargs["sync_with_dataloader"] = False
@@ -413,6 +466,61 @@ class LLaVATrainer(Trainer):
                     },
                 ]
 
+            if self.args.contrastive_projector_lr is not None:
+                projector_parameters = [name for name, _ in opt_model.named_parameters() if "contrastive_vision_projector" in name or "contrastive_text_projector" in name]
+                optimizer_grouped_parameters = [
+                    {
+                        "params": [
+                            p
+                            for n, p in opt_model.named_parameters()
+                            if (n in decay_parameters and n not in projector_parameters and p.requires_grad)
+                        ],
+                        "weight_decay": self.args.contrastive_projector_weight_decay,
+                    },
+                    {
+                        "params": [
+                            p
+                            for n, p in opt_model.named_parameters()
+                            if (n not in decay_parameters and n not in projector_parameters and p.requires_grad)
+                        ],
+                        "weight_decay": 0.0,
+                    },
+                    {
+                        "params": [
+                            p
+                            for n, p in opt_model.named_parameters()
+                            if (n in decay_parameters and n in projector_parameters and p.requires_grad)
+                        ],
+                        "weight_decay": self.args.contrastive_projector_weight_decay,
+                        "lr": self.args.contrastive_projector_lr,
+                    },
+                    {
+                        "params": [
+                            p
+                            for n, p in opt_model.named_parameters()
+                            if (n not in decay_parameters and n in projector_parameters and p.requires_grad)
+                        ],
+                        "weight_decay": 0.0,
+                        "lr": self.args.contrastive_projector_lr,
+                    },
+                ]
+            else:
+                optimizer_grouped_parameters = [
+                    {
+                        "params": [
+                            p for n, p in opt_model.named_parameters() if (n in decay_parameters and p.requires_grad)
+                        ],
+                        "weight_decay": self.args.contrastive_projector_weight_decay,
+                    },
+                    {
+                        "params": [
+                            p
+                            for n, p in opt_model.named_parameters()
+                            if (n not in decay_parameters and p.requires_grad)
+                        ],
+                        "weight_decay": 0.0,
+                    },
+                ]
             optimizer_cls, optimizer_kwargs = Trainer.get_optimizer_cls_and_kwargs(self.args)
 
             self.optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)

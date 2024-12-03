@@ -191,7 +191,7 @@ class LlavaMetaForCausalLM(ABC):
         image_feature = image_feature.view(num_frames, -1, num_dim)
         return image_feature
 
-    def encode_images(self, images):
+    def encode_images(self, images):  # images shape = (bs * num_frames, 3, 384, 384)
         image_features = self.get_model().get_vision_tower()(images)  # shape = (bs * num_frames, patch * patch = 27*27, dim=1152)
         # image_features = self.get_model().vision_resampler(image_features, images=images)
         image_features = self.get_model().mm_projector(image_features)  # shape = (bs * num_frames, patch * patch = 27*27, dim=3584)
@@ -221,7 +221,7 @@ class LlavaMetaForCausalLM(ABC):
             all_faster_video_features.append(faster_video_feature)
         return all_videos_or_images_features,all_faster_video_features
 
-    def add_token_per_grid(self, image_feature):
+    def add_token_per_grid(self, image_feature):  # image_feature shape = (num_frames, patch * patch, dim) (e.g., (64, 14*14, 3584))
         # import pdb; pdb.set_trace()
         resize_h = int(math.sqrt(image_feature.shape[1]))
         num_frames = image_feature.shape[0]

@@ -32,13 +32,14 @@ from llava.train.llava_trainer import LLaVATrainer
 
 from llava import conversation as conversation_lib
 from llava.model import *
+from llava.model.language_model.faith_llava_qwen import FaithLlavaQwenForCausalLM
 from llava.utils import rank0_print
 from llava.datamodule.lazy import LazySupervisedDataset, DataCollatorForSupervisedDataset
-from llava.datamodule.mira import MiraLazySupervisedDataset, MiraDataCollatorForSupervisedDataset
+from llava.datamodule.mira import MiraLazySupervisedDataset, MiraLazyContrastiveDataset, MiraDataCollatorForContrastiveDataset
 from llava.args import ModelArguments, DataArguments, TrainingArguments
 torch.multiprocessing.set_sharing_strategy("file_system")
 
-ImageFile.LOAD_TRUNCATED_IMAGES = True
+# ImageFile.LOAD_TRUNCATED_IMAGES = True
 local_rank = None
 
 
@@ -180,12 +181,15 @@ def smart_tokenizer_and_embedding_resize(
         output_embeddings[-num_new_tokens:] = output_embeddings_avg
 
 
-def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, data_args) -> Dict:
+def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, data_args, training_args, model_args) -> Dict:
     """Make dataset and collator for supervised fine-tuning."""
     if "mira" in data_args.data_path:
-        train_dataset = MiraLazySupervisedDataset(tokenizer=tokenizer, data_path=data_args.data_path, data_args=data_args)
-        data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
-        
+        if training_args.dehallu_finetune:
+            train_dataset = MiraLazyContrastiveDataset(tokenizer=tokenizer, data_path=data_args.data_path, data_args=data_args, model_args=model_args)
+            data_collator = MiraDataCollatorForContrastiveDataset(tokenizer=tokenizer)
+        else:
+            train_dataset = MiraLazySupervisedDataset(tokenizer=tokenizer, data_path=data_args.data_path, data_args=data_args)
+            data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
     else:
         train_dataset = LazySupervisedDataset(tokenizer=tokenizer, data_path=data_args.data_path, data_args=data_args)
         data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
@@ -263,58 +267,24 @@ def get_model(model_args, training_args, bnb_model_from_pretrained_args):
             **customized_kwargs,
         )
     elif model_args.vision_tower is not None:
-        if "mixtral" in model_args.model_name_or_path.lower():
-            model = LlavaMixtralForCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                attn_implementation=training_args.attn_implementation,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                low_cpu_mem_usage=False,
-                **customized_kwargs,
-            )
-            from transformers.models.mixtral.modeling_mixtral import MixtralSparseMoeBlock
-
-            deepspeed.utils.set_z3_leaf_modules(model, [MixtralSparseMoeBlock])
-        elif "mistral" in model_args.model_name_or_path.lower() or "zephyr" in model_args.model_name_or_path.lower():
-            model = LlavaMistralForCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                attn_implementation=training_args.attn_implementation,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                low_cpu_mem_usage=False,
-                **customized_kwargs,
-            )
-        elif (
-            "wizardlm-2" in model_args.model_name_or_path.lower()
-            or "vicuna" in model_args.model_name_or_path.lower()
-            or "llama" in model_args.model_name_or_path.lower()
-            or "yi" in model_args.model_name_or_path.lower()
-            or "nous-hermes" in model_args.model_name_or_path.lower()
-            and "wizard-2" in model_args.model_name_or_path.lower()
-        ):
-            model = LlavaLlamaForCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                attn_implementation=training_args.attn_implementation,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                low_cpu_mem_usage=False,
-                **customized_kwargs,
-            )
-        elif "qwen" in model_args.model_name_or_path.lower():
-            if "moe" in model_args.model_name_or_path.lower() or "A14B" in model_args.model_name_or_path:
-                model = LlavaQwenMoeForCausalLM.from_pretrained(
-                    model_args.model_name_or_path,
-                    cache_dir=training_args.cache_dir,
-                    attn_implementation=training_args.attn_implementation,
-                    torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                    low_cpu_mem_usage=False,
-                    **customized_kwargs,
-                )
-                from transformers.models.qwen2_moe.modeling_qwen2_moe import Qwen2MoeSparseMoeBlock
-
-                deepspeed.utils.set_z3_leaf_modules(model, [Qwen2MoeSparseMoeBlock])
+        if training_args.dehallu_finetune:
+            if "qwen" in model_args.model_name_or_path.lower():
+                if "moe" in model_args.model_name_or_path.lower() or "A14B" in model_args.model_name_or_path:
+                    raise NotImplementedError("Qwen-moe is not supported for dehallu finetuning yet.")
+                else:
+                    model = FaithLlavaQwenForCausalLM.from_pretrained(
+                        model_args.model_name_or_path,
+                        cache_dir=training_args.cache_dir,
+                        attn_implementation=training_args.attn_implementation,
+                        torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                        low_cpu_mem_usage=False,
+                        **customized_kwargs,
+                    )
             else:
-                model = LlavaQwenForCausalLM.from_pretrained(
+                raise NotImplementedError("Models except Qwen are not supported for dehallu finetuning yet.")
+        else:
+            if "mixtral" in model_args.model_name_or_path.lower():
+                model = LlavaMixtralForCausalLM.from_pretrained(
                     model_args.model_name_or_path,
                     cache_dir=training_args.cache_dir,
                     attn_implementation=training_args.attn_implementation,
@@ -322,17 +292,67 @@ def get_model(model_args, training_args, bnb_model_from_pretrained_args):
                     low_cpu_mem_usage=False,
                     **customized_kwargs,
                 )
-        elif "gemma" in model_args.model_name_or_path.lower():
-            model = LlavaGemmaForCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                cache_dir=training_args.cache_dir,
-                attn_implementation=training_args.attn_implementation,
-                torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
-                low_cpu_mem_usage=False,
-                **customized_kwargs,
-            )
-        else:
-            raise ValueError(f"Unknown model class {model_args}")
+                from transformers.models.mixtral.modeling_mixtral import MixtralSparseMoeBlock
+
+                deepspeed.utils.set_z3_leaf_modules(model, [MixtralSparseMoeBlock])
+            elif "mistral" in model_args.model_name_or_path.lower() or "zephyr" in model_args.model_name_or_path.lower():
+                model = LlavaMistralForCausalLM.from_pretrained(
+                    model_args.model_name_or_path,
+                    cache_dir=training_args.cache_dir,
+                    attn_implementation=training_args.attn_implementation,
+                    torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                    low_cpu_mem_usage=False,
+                    **customized_kwargs,
+                )
+            elif (
+                "wizardlm-2" in model_args.model_name_or_path.lower()
+                or "vicuna" in model_args.model_name_or_path.lower()
+                or "llama" in model_args.model_name_or_path.lower()
+                or "yi" in model_args.model_name_or_path.lower()
+                or "nous-hermes" in model_args.model_name_or_path.lower()
+                and "wizard-2" in model_args.model_name_or_path.lower()
+            ):
+                model = LlavaLlamaForCausalLM.from_pretrained(
+                    model_args.model_name_or_path,
+                    cache_dir=training_args.cache_dir,
+                    attn_implementation=training_args.attn_implementation,
+                    torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                    low_cpu_mem_usage=False,
+                    **customized_kwargs,
+                )
+            elif "qwen" in model_args.model_name_or_path.lower():
+                if "moe" in model_args.model_name_or_path.lower() or "A14B" in model_args.model_name_or_path:
+                    model = LlavaQwenMoeForCausalLM.from_pretrained(
+                        model_args.model_name_or_path,
+                        cache_dir=training_args.cache_dir,
+                        attn_implementation=training_args.attn_implementation,
+                        torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                        low_cpu_mem_usage=False,
+                        **customized_kwargs,
+                    )
+                    from transformers.models.qwen2_moe.modeling_qwen2_moe import Qwen2MoeSparseMoeBlock
+
+                    deepspeed.utils.set_z3_leaf_modules(model, [Qwen2MoeSparseMoeBlock])
+                else:
+                    model = LlavaQwenForCausalLM.from_pretrained(
+                        model_args.model_name_or_path,
+                        cache_dir=training_args.cache_dir,
+                        attn_implementation=training_args.attn_implementation,
+                        torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                        low_cpu_mem_usage=False,
+                        **customized_kwargs,
+                    )
+            elif "gemma" in model_args.model_name_or_path.lower():
+                model = LlavaGemmaForCausalLM.from_pretrained(
+                    model_args.model_name_or_path,
+                    cache_dir=training_args.cache_dir,
+                    attn_implementation=training_args.attn_implementation,
+                    torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
+                    low_cpu_mem_usage=False,
+                    **customized_kwargs,
+                )
+            else:
+                raise ValueError(f"Unknown model class {model_args}")
     else:
         model = transformers.LlamaForCausalLM.from_pretrained(
             model_args.model_name_or_path,
@@ -465,6 +485,9 @@ def train(attn_implementation=None):
             conversation_lib.default_conversation = conversation_lib.conv_templates[model_args.version]
         else:
             conversation_lib.default_conversation = conversation_lib.conv_templates["vicuna_v1"]
+    
+    if hasattr(model, "init_tokenizer"):
+        model.init_tokenizer(tokenizer)
 
     if model_args.vision_tower is not None:
         model.get_model().initialize_vision_modules(model_args=model_args, fsdp=training_args.fsdp)
@@ -544,6 +567,10 @@ def train(attn_implementation=None):
             vision_tower.requires_grad_(False)
             model.get_model().mm_projector.requires_grad_(False)
             model.get_model().vision_resampler.requires_grad_(False)
+            if hasattr(model.get_model(), "contrastive_vision_projector"):
+                model.get_model().contrastive_vision_projector.requires_grad_(False)
+            if hasattr(model.get_model(), "contrastive_text_projector"):
+                model.get_model().contrastive_text_projector.requires_grad_(False)
             # Parse the mm_tunable_parts to decide which parts to unfreeze
             tunable_parts = model_args.mm_tunable_parts.split(",")
             if "mm_mlp_adapter" in tunable_parts:
@@ -560,6 +587,10 @@ def train(attn_implementation=None):
                 for name, param in model.named_parameters():
                     if "vision_tower" not in name and "mm_projector" not in name and "vision_resampler" not in name:
                         param.requires_grad_(True)
+            if "contrastive_projector" in tunable_parts and training_args.dehallu_finetune:
+                for name, param in model.named_parameters():
+                    if "contrastive_vision_projector" in name or "contrastive_text_projector" in name:
+                        param.requires_grad_(True)
 
         total_params = sum(p.ds_numel if hasattr(p, "ds_numel") else p.numel() for p in model.parameters())
         trainable_params = sum(p.ds_numel if hasattr(p, "ds_numel") else p.numel() for p in model.parameters() if p.requires_grad)
@@ -574,6 +605,18 @@ def train(attn_implementation=None):
         training_args.use_im_start_end = model_args.mm_use_im_start_end
         model.config.mm_use_im_patch_token = model_args.mm_use_im_patch_token
         model.initialize_vision_tokenizer(model_args, tokenizer=tokenizer)
+        
+        # extra contrastive projector config
+        if training_args.dehallu_finetune:
+            assert training_args.vccl_wt + training_args.tpocl_wt + training_args.tpacl_wt > 0, "vccl_wt, tpocl_wt, tpacl_wt must be greater than 0 when dehallu_finetune is True"
+            model.config.tune_contrastive_projector = True
+            model.config.contrastive_projector_lr = training_args.contrastive_projector_lr
+            model.config.contrastive_projector_weight_decay = training_args.contrastive_projector_weight_decay
+            model.config.vccl_wt = training_args.vccl_wt
+            model.config.tpocl_wt = training_args.tpocl_wt
+            model.config.tpacl_wt = training_args.tpacl_wt
+            # extra config for hallu negative sampling on the fly
+            model.config.use_hard_neg = training_args.use_hard_neg
 
     if training_args.bits in [4, 8]:
         from peft.tuners.lora import LoraLayer
@@ -589,7 +632,7 @@ def train(attn_implementation=None):
                     if training_args.bf16 and module.weight.dtype == torch.float32:
                         module = module.to(torch.bfloat16)
 
-    data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
+    data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args, training_args=training_args, model_args=model_args)
     trainer = LLaVATrainer(model=model, tokenizer=tokenizer, args=training_args, **data_module)
 
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):

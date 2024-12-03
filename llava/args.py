@@ -113,6 +113,14 @@ class TrainingArguments(transformers.TrainingArguments):
     verbose_logging: bool = field(default=False)
     attn_implementation: str = field(default="flash_attention_2", metadata={"help": "Use transformers attention implementation."})
 
+    # contrastive projector
+    dehallu_finetune: Optional[bool] = field(default=False)
+    vccl_wt: Optional[float] = None
+    tpocl_wt: Optional[float] = None
+    tpacl_wt: Optional[float] = None
+    contrastive_projector_lr: Optional[float] = None
+    contrastive_projector_weight_decay: Optional[float] = None
+    use_hard_neg: Optional[bool] = field(default=True)
 
 # @dataclass
 # class EvaluationArguments:

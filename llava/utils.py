@@ -30,7 +30,6 @@ def process_video_with_decord(video_file, data_args):
     frame_idx = [i for i in range(0, total_frame_num, avg_fps)]
     frame_time = [i/avg_fps for i in frame_idx]
 
-    
     if data_args.frames_upbound > 0:
         if len(frame_idx) > data_args.frames_upbound or data_args.force_sample:
             uniform_sampled_frames = np.linspace(0, total_frame_num - 1, data_args.frames_upbound, dtype=int)
@@ -125,6 +124,10 @@ def build_logger(logger_name, logger_filename):
 
     return logger
 
+def rank0_breakpoint():
+    if dist.get_rank() == 0:
+        breakpoint()
+    dist.barrier()
 
 class StreamToLogger(object):
     """
