@@ -22,20 +22,28 @@ alias python=python3
 cd /home/kaipoc/personal/research_vh/LLaVA-NeXT/
 
 ############### Show Envs ####################
+ip addr
 ibstat
 ibv_devinfo
 nvidia-smi
-master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 
-# export OMP_NUM_THREADS=8
+export DECORD_DUPLICATE_WARNING_THRESHOLD=1.0
+export OMP_NUM_THREADS=1
+export NCCL_BLOCKING_WAIT=0
+# export NCCL_P2P_DISABLE=1
+export NCCL_IB_SL=1
+export NCCL_TIMEOUT_MS=7200000
+export NCCL_IB_GID_INDEX=3
+export CUDA_DEVICE_MAX_CONNECTIONS=1
 # export NCCL_IB_DISABLE=0
-# export NCCL_IB_GID_INDEX=3
+# export NCCL_DEBUG=INFO
+# export NCCL_DEBUG_SUBSYS=ALL
 # export NCCL_IB_TIMEOUT=22
 # export NCCL_SOCKET_IFNAME=eth0
-# export NCCL_DEBUG=INFO
 # export NCCL_ASYNC_ERROR_HANDLING=1
 # export NCCL_SHM_DISABLE=1
 
+master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 port=$(( ( $SLURM_JOB_ID % 10000 ) + 20000 ))
 export WANDB_API_KEY=d4db7112c0ff6ba1e4243f6b406f49ce29ff92ba
 
@@ -61,6 +69,12 @@ num_train_epochs=${3}
 plm_lr=${4}
 vt_lr=${5}
 bs_per_device=${6}
+dehallu_finetune=${7}   
+cp_lr=${8}
+vccl_wt=${9}
+tpocl_wt=${10}
+tpacl_wt=${11}
+use_hard_neg=${12}
 report_to="wandb"
 
 echo "total workers: ${n_node}"
@@ -71,13 +85,13 @@ echo "master port: ${port}"
 # ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${ARNOLD_WORKER_GPU}" --nnodes="${ARNOLD_WORKER_NUM}" --node_rank="${ARNOLD_ID}" --master_addr="${METIS_WORKER_0_HOST}" --master_port="${port_in_cmd}" \
 torchrun --nproc_per_node=8 --nnodes="${SLURM_JOB_NUM_NODES}" --node_rank="${CURRENT_RANK}" --master_addr="${master_addr}" --master_port="${port}" \
     llava/train/train_mem.py \
-    --deepspeed scripts/zero3.json \
+    --deepspeed scripts/zero2.json \
     --model_name_or_path "${PREV_STAGE_CHECKPOINT}" \
     --version "${PROMPT_VERSION}" \
-    --data_path /home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/seg_fixed_parsed_data/seg_merged_miradata_84k_train_dataset.csv \
-    --image_folder /home/kaipoc/personal/research_vh/NULL \
-    --video_folder /home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/video/clip_video \
-    --mm_tunable_parts "mm_vision_tower,mm_mlp_adapter,mm_language_model" \
+    --data_path "/home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/seg64_fixed_parsed_data/seg64_merged_miradata_84k_train_dataset.csv" \
+    --image_folder "/home/kaipoc/personal/research_vh/NULL" \
+    --video_folder "/home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/video/clip_video" \
+    --mm_tunable_parts "mm_mlp_adapter,mm_language_model,contrastive_projector" \
     --mm_vision_tower_lr "${vt_lr}" \
     --vision_tower "${VISION_MODEL_VERSION}" \
     --mm_projector_type mlp2x_gelu \
@@ -97,7 +111,7 @@ torchrun --nproc_per_node=8 --nnodes="${SLURM_JOB_NUM_NODES}" --node_rank="${CUR
     --gradient_accumulation_steps 2 \
     --evaluation_strategy "no" \
     --save_strategy "steps" \
-    --save_steps 40 \
+    --save_steps 20 \
     --save_total_limit 30 \
     --learning_rate "${plm_lr}" \
     --weight_decay 0. \
@@ -117,6 +131,16 @@ torchrun --nproc_per_node=8 --nnodes="${SLURM_JOB_NUM_NODES}" --node_rank="${CUR
     --mm_newline_position grid \
     --add_time_instruction True \
     --force_sample True \
-    --mm_spatial_pool_stride 2
+    --mm_spatial_pool_stride 2 \
+    --dehallu_finetune "${dehallu_finetune}" \
+    --contrastive_projector_lr "${cp_lr}" \
+    --contrastive_projector_weight_decay 0.05 \
+    --vccl_wt "${vccl_wt}" \
+    --tpocl_wt "${tpocl_wt}" \
+    --tpacl_wt "${tpacl_wt}" \
+    --use_hard_neg "${use_hard_neg}"
+
+# Delete all files starting with 'core.' in the specified directory
+# find /home/kaipoc/personal/research_vh/LLaVA-NeXT/ -type f -regex 'core.[0-9]+' -delete
 
 exit 0;

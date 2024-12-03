@@ -37,9 +37,14 @@ echo "MID_RUN_NAME: ${MID_RUN_NAME}"
 
 ################ Noticed Parameters ##############
 n_node=1
-nproc_per_node=1
+nproc_per_node=8
 output_dir="/home/kaipoc/personal/research_vh/LLaVA-NeXT/checkpoints/exps/debug"
-
+dehallu_finetune=True
+cp_lr=1e-4
+vccl_wt=1.0
+tpocl_wt=1.0
+tpacl_wt=0.0
+use_hard_neg=True
 
 echo "master ip: ${master_addr}"
 echo "master port: ${port}"
@@ -47,13 +52,13 @@ echo "master port: ${port}"
 # ACCELERATE_CPU_AFFINITY=1 torchrun --nproc_per_node="${ARNOLD_WORKER_GPU}" --nnodes="${ARNOLD_WORKER_NUM}" --node_rank="${ARNOLD_ID}" --master_addr="${METIS_WORKER_0_HOST}" --master_port="${port_in_cmd}" \
 torchrun --nproc_per_node="${nproc_per_node}" --nnodes="${n_node}" --node_rank="${CURRENT_RANK}" --master_addr="${master_addr}" --master_port="${port}" \
     llava/train/train_mem.py \
-    --deepspeed scripts/zero3.json \
+    --deepspeed scripts/zero2.json \
     --model_name_or_path "$PREV_STAGE_CHECKPOINT" \
     --version "$PROMPT_VERSION" \
-    --data_path /home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/seg_fixed_parsed_data/seg_merged_miradata_84k_train_dataset.csv \
+    --data_path "/home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/seg64_fixed_parsed_data/84k_train_split_1.csv" \
     --image_folder /home/kaipoc/personal/research_vh/NULL \
     --video_folder /home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/video/clip_video \
-    --mm_tunable_parts="mm_mlp_adapter" \
+    --mm_tunable_parts="mm_mlp_adapter,mm_language_model,contrastive_projector" \
     --mm_vision_tower_lr=2e-6 \
     --vision_tower "${VISION_MODEL_VERSION}" \
     --mm_projector_type mlp2x_gelu \
@@ -68,7 +73,7 @@ torchrun --nproc_per_node="${nproc_per_node}" --nnodes="${n_node}" --node_rank="
     --run_name "${run_name}" \
     --output_dir "${output_dir}" \
     --num_train_epochs 1 \
-    --per_device_train_batch_size 2 \
+    --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 4 \
     --gradient_accumulation_steps 2 \
     --evaluation_strategy "no" \
@@ -93,6 +98,13 @@ torchrun --nproc_per_node="${nproc_per_node}" --nnodes="${n_node}" --node_rank="
     --mm_newline_position grid \
     --add_time_instruction True \
     --force_sample True \
-    --mm_spatial_pool_stride 2
+    --mm_spatial_pool_stride 2 \
+    --dehallu_finetune "${dehallu_finetune}" \
+    --contrastive_projector_lr "${cp_lr}" \
+    --contrastive_projector_weight_decay 0.05 \
+    --vccl_wt "${vccl_wt}" \
+    --tpocl_wt "${tpocl_wt}" \
+    --tpacl_wt "${tpacl_wt}" \
+    --use_hard_neg "${use_hard_neg}"
 
 exit 0;

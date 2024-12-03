@@ -1,5 +1,5 @@
 #!/bin/bash
-ROOT_DIR="/mnt/bn/vl-research/workspace/yhzhang/LLaVA-NeXT"
+ROOT_DIR="/home/kaipoc/personal/research_vh/LLaVA-NeXT"
 
 if [ ! -e $ROOT_DIR ]; then
     echo "The root dir does not exist. Exiting the script."
