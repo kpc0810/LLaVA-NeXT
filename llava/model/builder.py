@@ -23,10 +23,10 @@ from llava.model import *
 from llava.constants import DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from llava.utils import rank0_print
 
-def load_pretrained_faith_model(model_path, model_base, model_name, load_8bit=False, load_4bit=False, device_map="auto", attn_implementation="flash_attention_2", customized_config=None, overwrite_config=None, **kwargs):
+def load_pretrained_faith_model(model_path, model_name, load_8bit=False, load_4bit=False, device_map="auto", attn_implementation="flash_attention_2", customized_config=None, overwrite_config=None, **kwargs):
     
     # copy from `load_pretrained_model`
-    kwargs["device_map"] = device_map
+    # kwargs["device_map"] = device_map
     if load_8bit:
         kwargs["load_in_8bit"] = True
     elif load_4bit:
@@ -47,8 +47,6 @@ def load_pretrained_faith_model(model_path, model_base, model_name, load_8bit=Fa
     if "llava" in model_name.lower() or is_multimodal:
         if "lora" in model_name.lower():
             raise NotImplementedError("LoRA weights are not supported for Faith models")
-        elif model_base is not None:
-            raise NotImplementedError("Loading from a base model is not supported for Faith models")
         else:
             rank0_print(f"Loaded LLaVA model: {model_path}")
             if "qwen" in model_name.lower():
@@ -59,11 +57,13 @@ def load_pretrained_faith_model(model_path, model_base, model_name, load_8bit=Fa
                     rank0_print(f"Overwriting config with {overwrite_config}")
                     for k, v in overwrite_config.items():
                         setattr(llava_cfg, k, v)
-                    model = FaithLlavaQwenForCausalLM.from_pretrained(model_path, low_cpu_mem_usage=True, attn_implementation=attn_implementation, config=llava_cfg, **kwargs)
+                    model = FaithLlavaQwenForCausalLM.from_pretrained(model_path, low_cpu_mem_usage=False, attn_implementation=attn_implementation, config=llava_cfg, **kwargs)
                 else:
-                    model = FaithLlavaQwenForCausalLM.from_pretrained(model_path, low_cpu_mem_usage=True, attn_implementation=attn_implementation, **kwargs)
+                    model = FaithLlavaQwenForCausalLM.from_pretrained(model_path, low_cpu_mem_usage=False, attn_implementation=attn_implementation, **kwargs)
             else:
                 raise ValueError(f"Model {model_name} not supported")
+    else:
+        raise ValueError(f"Model {model_name} not supported")
     rank0_print(f"Model Class: {model.__class__.__name__}")
     image_processor = None
 
@@ -84,12 +84,7 @@ def load_pretrained_faith_model(model_path, model_base, model_name, load_8bit=Fa
         if device_map != "auto":
             vision_tower.to(device="cuda", dtype=torch.float16)
         image_processor = vision_tower.image_processor
-        
-        # load mm projector
-        mm_projector = model.get_mm_projector()
-        mm_projector.from_pretrained(model_path)  # TODO: check if this is correct
-        mm_projector.to(device="cuda", dtype=torch.float16)
-        
+
     if hasattr(model.config, "max_sequence_length"):
         context_len = model.config.max_sequence_length
     elif hasattr(model.config, "max_position_embeddings"):
@@ -99,7 +94,7 @@ def load_pretrained_faith_model(model_path, model_base, model_name, load_8bit=Fa
     else:
         context_len = 2048
         
-    return model, image_processor, context_len
+    return tokenizer, model, image_processor, context_len
 
 
 def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, load_4bit=False, device_map="auto", attn_implementation="flash_attention_2", customized_config=None, overwrite_config=None, **kwargs):

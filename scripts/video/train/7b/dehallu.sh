@@ -31,9 +31,11 @@ export DECORD_DUPLICATE_WARNING_THRESHOLD=1.0
 export OMP_NUM_THREADS=1
 export NCCL_BLOCKING_WAIT=0
 # export NCCL_P2P_DISABLE=1
-export NCCL_IB_SL=1
+export NCCL_IB_SL=0
+export NCCL_IB_TC=41
 export NCCL_TIMEOUT_MS=7200000
 export NCCL_IB_GID_INDEX=3
+export NCCL_SOCKET_IFNAME=eth1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
 # export NCCL_IB_DISABLE=0
 # export NCCL_DEBUG=INFO
@@ -111,7 +113,7 @@ torchrun --nproc_per_node=8 --nnodes="${SLURM_JOB_NUM_NODES}" --node_rank="${CUR
     --gradient_accumulation_steps 2 \
     --evaluation_strategy "no" \
     --save_strategy "steps" \
-    --save_steps 20 \
+    --save_steps 80 \
     --save_total_limit 30 \
     --learning_rate "${plm_lr}" \
     --weight_decay 0. \

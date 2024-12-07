@@ -17,7 +17,7 @@ from transformers import AutoConfig
 
 import cv2
 import base64
-import openai
+# import openai
 
 from PIL import Image
 
