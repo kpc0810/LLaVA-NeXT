@@ -15,6 +15,7 @@ slurm_error/
 
 # Data
 !**/alpaca-data-conversation.json
+outputs/
 # Editor
 .idea
 *.swp
