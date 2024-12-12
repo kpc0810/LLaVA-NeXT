@@ -4,17 +4,18 @@ import json
 import csv
 import ast
 import numpy as np
+from tqdm import tqdm
 from multiprocessing.pool import Pool
 from collections import defaultdict
 
+from llava.model.utils import parse_object_nouns_and_action_verbs
 from pycocoevalcap.tokenizer.ptbtokenizer import PTBTokenizer
 from pycocoevalcap.bleu.bleu import Bleu
 from pycocoevalcap.meteor.meteor import Meteor
 from pycocoevalcap.rouge.rouge import Rouge
 from pycocoevalcap.cider.cider import Cider
-from bert_score import score as bert_score_compute
 from sentence_transformers import SentenceTransformer, util
-from tqdm import tqdm
+from bert_score import score as bert_score_compute
 
 import spacy
 from nltk.stem import PorterStemmer
@@ -77,34 +78,6 @@ def calculate_coverage(clip_id, pd, test_data_dict):
             gt_act_words.remove(gt_act)
     
     return coveage_obj_num / len_gt_obj_words, coveage_act_num / len_gt_act_words
-
-
-def parse_object_nouns_and_action_verbs(input_paragraph):
-    """
-    Parse the input paragraph to get the action verbs and noun objects.
-    """
-    object_nouns, action_verbs = [], []
-    doc = nlp(input_paragraph)
-    
-    def is_action_verb(token):
-        if token.pos_ == "VERB":
-            has_direct_object = any(child.dep_ == "dobj" for child in token.children)  # 檢查是否有直接賓語
-            has_prep_and_object = any(child.dep_ == "prep" and any(grandchild.dep_ == "pobj" for grandchild in child.children) for child in token.children)  # 檢查是否有介詞及其受詞結構
-            has_subject = any(child.dep_ in ["nsubj", "nsubjpass"] for child in token.children)  # 檢查是否有主語（包括主動和被動）
-            
-            if has_direct_object or has_prep_and_object or has_subject:
-                return True
-        return False
-
-    for token in doc:
-        if is_action_verb(token):
-            action_verbs.append(token.text)
-        
-        # 判斷token是否為直接受詞、介詞受詞、主語或其他物件類型，且詞性必須是名詞、專有名詞或代詞
-        if token.dep_ in ["dobj", "pobj", "nsubj", "obj"] and token.pos_ in ["NOUN", "PROPN", "PRON"]:
-            object_nouns.append(token.text)
-            
-    return object_nouns, action_verbs
 
 
 def calculate_chair(pd, gt):

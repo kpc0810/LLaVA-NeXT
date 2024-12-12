@@ -1,5 +1,5 @@
 #!/bin/bash
-source /lustre/fsw/portfolios/nvr/users/${USER}/miniconda3/bin/activate vila-eval
+source /lustre/fsw/portfolios/nvr/users/${USER}/miniconda3/bin/activate llava-eval
 which conda
 which scontrol
 which torchrun
@@ -7,6 +7,18 @@ conda activate llava-eval
 which python
 
 cd /home/kaipoc/personal/research_vh/LLaVA-NeXT/
+
+# export to avoid NCCL error
+export DECORD_DUPLICATE_WARNING_THRESHOLD=1.0
+export OMP_NUM_THREADS=1
+export NCCL_BLOCKING_WAIT=0
+export NCCL_IB_SL=0
+export NCCL_IB_TC=41
+export NCCL_TIMEOUT_MS=7200000
+export NCCL_IB_GID_INDEX=3
+export NCCL_IB_TIMEOUT=31
+export NCCL_SOCKET_IFNAME=eth1
+export CUDA_DEVICE_MAX_CONNECTIONS=1
 
 master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=${master_addr:-"127.0.0.1"}

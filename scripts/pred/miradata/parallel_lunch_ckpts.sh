@@ -18,7 +18,7 @@ for ((i = 1; i <= num_iterations; i++)); do
     for single_ckpt_dir in $all_ckpt_dir; do
         if [[ $(basename "$single_ckpt_dir") == checkpoint* ]]; then
             ckpt_iter=$(basename "$single_ckpt_dir" | rev | cut -d'-' -f1 | rev)
-            pred_filename="pred_[${exp_name}]_[${ckpt_iter}]_[iter${i}]"
+            pred_filename="pred_[${exp_name}]_[${ckpt_iter}]"
 
             echo "Running inference for $single_ckpt_dir with output name $pred_filename!"
 

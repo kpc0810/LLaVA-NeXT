@@ -1,5 +1,6 @@
 # Standard library imports
 import argparse
+import asyncio
 import base64
 import copy
 import csv
@@ -7,10 +8,14 @@ import json
 import math
 import os
 import random
+import signal
 import time
 import glob
 import re
 from collections import namedtuple
+from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
+from functools import partial
 
 # Third-party library imports
 import cv2
@@ -164,6 +169,25 @@ def merge_temp_files(output_dir, output_name, answers_path):
 
     return
 
+def _timeout_handler(signum, frame):
+    raise Exception("Function execution exceeded 30 minutes.")
+
+def sample_from_vid_with_time_control(video_file, data_args):
+    # set timeout for 30 minutes
+    signal.signal(signal.SIGALRM, _timeout_handler)
+    signal.alarm(1800)
+
+    try:
+        # execute long-time task
+        result = process_video_with_decord(video_file, data_args)
+        # close the alarm after the task is executed
+        signal.alarm(0)
+        return result
+    except Exception as e:
+        print(f"ERROR: {e}")
+        # timeout then return None
+        return None
+
 def run_inference(args):
     """
     Run inference on Miradata Captioning DataSet using the LLaVA-Video model.
@@ -172,7 +196,7 @@ def run_inference(args):
         args: Command-line arguments.
     """
     # Intialize the distributed environment
-    dist.init_process_group(backend='nccl')
+    dist.init_process_group(backend='nccl', timeout=timedelta(seconds=7200000))
     local_rank = dist.get_rank()
     world_size = dist.get_world_size()
     torch.cuda.set_device(local_rank)  # This sets the current GPU device to the one corresponding to the local rank
@@ -268,12 +292,16 @@ def run_inference(args):
             rank_print(f"Skipping {video_id}-{clip_id} because it is in the cache")
             continue
     
-        rank_print(f"Process {local_rank}: Captioning from video with video_id-clip_id: {video_id}-{clip_id}")
+        rank_print(f"Captioning from video with video_id-clip_id: {video_id}-{clip_id}")
         video_file = os.path.join(args.video_folder, video_file)
         if not os.path.exists(video_file):
             rank_print(f"Video file {video_file} does not exist")
             continue
-        video, video_time, frame_time, num_frames_to_sample = process_video_with_decord(video_file, data_args)
+        # video, video_time, frame_time, num_frames_to_sample = process_video_with_decord(video_file, data_args)
+        result = sample_from_vid_with_time_control(video_file, data_args)
+        if result is None:
+            continue
+        video, video_time, frame_time, num_frames_to_sample = result
         video = image_processor.preprocess(video, return_tensors="pt")["pixel_values"].half().cuda(local_rank)
         video = [video]
 
@@ -329,6 +357,7 @@ def run_inference(args):
     temp_answers_file.close()
     dist.barrier()
     merge_temp_files(args.output_dir, args.output_name, answers_path)
+    rank_print("Finish writing!")
     dist.barrier()
     return
 
@@ -336,3 +365,5 @@ def run_inference(args):
 if __name__ == "__main__":
     args = parse_args()
     run_inference(args)
+    dist.barrier()
+    rank_print("Done!")
