@@ -521,6 +521,9 @@ class LLaVATrainer(Trainer):
                         "weight_decay": 0.0,
                     },
                 ]
+            
+            # TODO: It seems that we do not need to handle the act_squeezer here, since we always use deepspeed in out training exps.    
+            
             optimizer_cls, optimizer_kwargs = Trainer.get_optimizer_cls_and_kwargs(self.args)
 
             self.optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)

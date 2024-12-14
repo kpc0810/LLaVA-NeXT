@@ -33,7 +33,7 @@ from llava.train.llava_trainer import LLaVATrainer
 from llava import conversation as conversation_lib
 from llava.model import *
 from llava.model.language_model.faith_llava_qwen import FaithLlavaQwenForCausalLM
-from llava.utils import rank0_print
+from llava.utils import rank_print, rank0_print, rank0_breakpoint
 from llava.datamodule.lazy import LazySupervisedDataset, DataCollatorForSupervisedDataset
 from llava.datamodule.mira import MiraLazySupervisedDataset, MiraLazyContrastiveDataset, MiraDataCollatorForContrastiveDataset
 from llava.args import ModelArguments, DataArguments, TrainingArguments
@@ -272,6 +272,8 @@ def get_model(model_args, training_args, bnb_model_from_pretrained_args):
                 if "moe" in model_args.model_name_or_path.lower() or "A14B" in model_args.model_name_or_path:
                     raise NotImplementedError("Qwen-moe is not supported for dehallu finetuning yet.")
                 else:
+                    rank_print("#######################################################################################################################################")
+                    rank_print("### If contrastive projector is not loaded here, do not worry since it will be loaded in `deepspeed_load_checkpoint` in trainer.py. ###")
                     model = FaithLlavaQwenForCausalLM.from_pretrained(
                         model_args.model_name_or_path,
                         cache_dir=training_args.cache_dir,
@@ -280,6 +282,7 @@ def get_model(model_args, training_args, bnb_model_from_pretrained_args):
                         low_cpu_mem_usage=False,
                         **customized_kwargs,
                     )
+                    rank_print("#######################################################################################################################################")
             else:
                 raise NotImplementedError("Models except Qwen are not supported for dehallu finetuning yet.")
         else:
@@ -571,6 +574,9 @@ def train(attn_implementation=None):
                 model.get_model().contrastive_vision_projector.requires_grad_(False)
             if hasattr(model.get_model(), "contrastive_text_projector"):
                 model.get_model().contrastive_text_projector.requires_grad_(False)
+            if hasattr(model.get_model(), "act_squeezer"):
+                model.get_model().act_squeezer.requires_grad_(False)
+            
             # Parse the mm_tunable_parts to decide which parts to unfreeze
             tunable_parts = model_args.mm_tunable_parts.split(",")
             if "mm_mlp_adapter" in tunable_parts:
@@ -590,6 +596,10 @@ def train(attn_implementation=None):
             if "contrastive_projector" in tunable_parts and training_args.dehallu_finetune:
                 for name, param in model.named_parameters():
                     if "contrastive_vision_projector" in name or "contrastive_text_projector" in name:
+                        param.requires_grad_(True)
+            if "act_squeezer" in tunable_parts and training_args.dehallu_finetune:
+                for name, param in model.named_parameters():
+                    if "act_squeezer" in name:
                         param.requires_grad_(True)
 
         total_params = sum(p.ds_numel if hasattr(p, "ds_numel") else p.numel() for p in model.parameters())

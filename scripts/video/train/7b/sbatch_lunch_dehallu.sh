@@ -8,7 +8,7 @@ fi
 
 EXP_NAME=$(basename "$CONFIG_FILE" .ini)
 
-# 讀取 config.ini
+# read config.ini
 total_runs=$(grep '^total_runs' "$CONFIG_FILE" | awk -F ' = ' '{print $2}')
 n_nodes=$(grep '^n_nodes' "$CONFIG_FILE" | awk -F ' = ' '{print $2}')
 num_train_epochs=$(grep '^num_train_epochs' "$CONFIG_FILE" | awk -F ' = ' '{print $2}')
