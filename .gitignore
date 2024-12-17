@@ -77,5 +77,6 @@ mlx_configs/
 data_processing/
 # demo/
 
+test.py
 # dataset
 DREAM-1K/
