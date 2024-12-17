@@ -76,3 +76,6 @@ playground/*.json
 mlx_configs/
 data_processing/
 # demo/
+
+# dataset
+DREAM-1K/
