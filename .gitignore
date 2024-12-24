@@ -81,3 +81,4 @@ data_processing/
 test.py
 # dataset
 DREAM-1K/
+*.out

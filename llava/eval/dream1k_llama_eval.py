@@ -468,6 +468,8 @@ def argmument():
     parser.add_argument('--pred_file', type=str, default='outputs/dream1k/dream1k_pred_results.jsonl')
     parser.add_argument('--output_dir', type=str, default='outputs/dream1k')
     parser.add_argument('--model_name', type=str, default='meta-llama/Meta-Llama-3.1-8B-Instruct')
+    parser.add_argument('--debug', action='store_true')
+    
     return parser.parse_args()
         
 if __name__ == '__main__':
@@ -477,6 +479,9 @@ if __name__ == '__main__':
     args = argmument()
     with open(args.pred_file, "r") as f:
         dataset = [json.loads(line) for line in f]
+    if args.debug:
+        dataset = dataset[:100]
+        
     metric = DREAMGPTMetric(args.dataset_name, args.model_name, verbose=True)
     metric.process(dataset)
     metric.summarize_metric()
