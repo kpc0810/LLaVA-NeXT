@@ -111,6 +111,8 @@ def parse_args():
     parser.add_argument("--mm_newline_position", type=str, default="no_token")
     parser.add_argument("--force_sample", type=lambda x: (str(x).lower() == 'true'), default=False)
     parser.add_argument("--add_time_instruction", type=str, default=False)
+    parser.add_argument("--question", type=str, default="Please provide a detailed description of the video, focusing on the main subjects, their actions, and the background scenes.")
+    
     return parser.parse_args()
 
 def load_video(video_path,args):
@@ -307,7 +309,7 @@ def run_inference(args):
 
         time_instruciton = f"The video lasts for {video_time:.2f} seconds, and {num_frames_to_sample} frames are uniformly sampled from it. These frames are located at {frame_time}.Please answer the following questions related to this video."
         
-        question = "Please provide a detailed description of the video, focusing on the main subjects, their actions, and the background scenes."
+        question = args.question
         # question = "Describe the video in detail."
         sample["prompt"] = f'{DEFAULT_IMAGE_TOKEN}\n{time_instruciton}\n{question}'
 
