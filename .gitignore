@@ -73,6 +73,7 @@ scripts/multi-images
 scratchpad
 build/
 playground/*.json
+playground/videomme
 mlx_configs/
 data_processing/
 # demo/
