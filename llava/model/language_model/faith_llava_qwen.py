@@ -361,69 +361,65 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
             self.model.itc_temp.data.clamp_(0.01, 0.5)
 
         bs = last_hidden_state.size(0)
-        ## flat obj_tracklet_indices and get corresponding obj_phrase_indices, filter out the empty tracklet indices and repeated objs 
-        ## (filter repeated objs for avoiding pushing the false negative). Note that the situation of repeated objs occurs when bs_per_device > 1.
-        flat_obj_tracklet_indices = []  # List[List[int]]: [bs, num_detected_obj, occupied_patch_indices]
+        device = last_hidden_state.device
+
+        ## aggr_obj_phrase_embeddings and aggr_obj_tracklet_embeddings
+        aggr_obj_phrase_embeddings = torch.tensor([]).to(last_hidden_state.device).to(last_hidden_state.dtype)  # [bs * num_detected_obj, hidden_dim]
+        aggr_obj_tracklet_embeddings = torch.tensor([]).to(last_hidden_state.device).to(last_hidden_state.dtype)  # [bs * num_detected_obj, hidden_dim]
+
+        filtered_obj_tracklet_indices = []  # List[List[int]]: [bs, num_detected_obj, occupied_patch_indices]
         filtered_obj_phrase_indices = []  # List[List[torch.LongTensor]]: [bs, num_detected_obj, occupied_token_indices]
-        added_obj_words = []  # List[str]: [bs, num_no_repeated_obj_in_batch]
+        added_obj_words = []  # List[str]: [num_no_repeated_obj]
         for batch_idx in range(bs):
-            sub_flat_obj_tracklet_indices, sub_filtered_obj_phrase_indices = [], []
+            sub_filtered_obj_tracklet_indices, sub_filtered_obj_phrase_indices = [], []
             for obj_idx, all_tracklet_indices in enumerate(new_obj_tracklet_indices[batch_idx]):
                 flat_tracklet_indices = []
                 for frame_idx, tracklet_indices in enumerate(all_tracklet_indices):
                     flat_tracklet_indices += tracklet_indices
                 obj_word = obj_words[batch_idx][obj_idx]
                 if (flat_tracklet_indices != []) and (obj_word not in added_obj_words):
-                    sub_flat_obj_tracklet_indices.append(flat_tracklet_indices)
+                    sub_filtered_obj_tracklet_indices.append(flat_tracklet_indices)
                     sub_filtered_obj_phrase_indices.append(new_obj_phrase_indices[batch_idx][obj_idx])
                     added_obj_words.append(obj_word)
-            flat_obj_tracklet_indices.append(sub_flat_obj_tracklet_indices)
+            filtered_obj_tracklet_indices.append(sub_filtered_obj_tracklet_indices)
             filtered_obj_phrase_indices.append(sub_filtered_obj_phrase_indices)
 
-        aggr_obj_phrase_embeddings = torch.tensor([]).to(last_hidden_state.device).to(last_hidden_state.dtype)  # [bs * num_detected_obj, hidden_dim]
-        aggr_obj_tracklet_embeddings = torch.tensor([]).to(last_hidden_state.device).to(last_hidden_state.dtype)  # [bs * num_detected_obj, hidden_dim]
         for batch_idx in range(bs):
             text_aggr_embedding = self.get_aggr_embedding(last_hidden_state[batch_idx], filtered_obj_phrase_indices[batch_idx])  # [num_detected_obj, hidden_dim]
-            vis_aggr_embedding = self.get_aggr_embedding(last_hidden_state[batch_idx], flat_obj_tracklet_indices[batch_idx])  # [num_detected_obj, hidden_dim]
+            vis_aggr_embedding = self.get_aggr_embedding(last_hidden_state[batch_idx], filtered_obj_tracklet_indices[batch_idx])  # [num_detected_obj, hidden_dim]
             aggr_obj_phrase_embeddings = torch.cat((aggr_obj_phrase_embeddings, text_aggr_embedding), dim=0)
             aggr_obj_tracklet_embeddings = torch.cat((aggr_obj_tracklet_embeddings, vis_aggr_embedding), dim=0)
 
-        # No object detected from the current video clips
-        if len(aggr_obj_phrase_embeddings) == 0 or len(aggr_obj_tracklet_embeddings) == 0:
-            return None
+        obj_phrase_embeddings = self.model.contrastive_text_projector(aggr_obj_phrase_embeddings)
+        obj_tracklet_embeddings = self.model.contrastive_vision_projector(aggr_obj_tracklet_embeddings)
 
-        aggr_obj_phrase_embeddings = self.model.contrastive_text_projector(aggr_obj_phrase_embeddings)
-        aggr_obj_tracklet_embeddings = self.model.contrastive_vision_projector(aggr_obj_tracklet_embeddings)
-        obj_phrase_embeddings = aggr_obj_phrase_embeddings.clone()
-        
+        ## gather_obj_phrase_embeddings and gather_obj_tracklet_embeddings
+        gather_obj_phrase_embeddings = all_gather(obj_phrase_embeddings)
+        gather_obj_phrase_embeddings = torch.concat([data.to(device) for data in gather_obj_phrase_embeddings], dim=0)  # [bs*num_process*num_detected_obj, hidden_dim]
+        gather_obj_tracklet_embeddings = all_gather(obj_tracklet_embeddings)
+        gather_obj_tracklet_embeddings = torch.concat([data.to(device) for data in gather_obj_tracklet_embeddings], dim=0)  # [bs*num_process*num_detected_obj, hidden_dim]
+
+        ## gather_obj_phrase_embeddings (if hallu)
         if hallu_last_hidden_state is not None:
             # aggregate the hallucinated object phrase embeddings
-            aggr_hallu_obj_phrase_embeddings = torch.tensor([]).to(last_hidden_state.device).to(last_hidden_state.dtype)  # torch.FloatTensor: [bs * num_hallu_obj_words, hidden_dim]
-            flat_hallu_obj_words = []  # List[str]: [bs * num_hallu_obj_words]
+            hallu_obj_phrase_embeddings = torch.tensor([]).to(device).to(last_hidden_state.dtype)  # torch.FloatTensor: [bs * num_hallu_obj_words, hidden_dim]
             for batch_idx in range(bs):
                 hallu_text_aggr_embedding = self.get_aggr_embedding(hallu_last_hidden_state[batch_idx], hallu_obj_phrase_indices[batch_idx])  # [num_hallu_obj_words, hidden_dim]
-                aggr_hallu_obj_phrase_embeddings = torch.cat((aggr_hallu_obj_phrase_embeddings, hallu_text_aggr_embedding), dim=0)
-                flat_hallu_obj_words += hallu_obj_words[batch_idx]
-            
-            # remove the repeated obj words from the hallucinated object phrase embeddings
-            filtered_hallu_obj_phrase_embeddings = torch.tensor([]).to(last_hidden_state.device).to(last_hidden_state.dtype)  # torch.FloatTensor: [bs * num_hallu_obj_words, hidden_dim]
-            for hallu_obj_idx, hallu_obj_word in enumerate(flat_hallu_obj_words):
-                if hallu_obj_word not in added_obj_words:
-                    added_obj_words.append(hallu_obj_word)
-                    filtered_hallu_obj_phrase_embeddings = torch.cat((filtered_hallu_obj_phrase_embeddings, aggr_hallu_obj_phrase_embeddings[hallu_obj_idx].unsqueeze(dim=0)), dim=0)
+                hallu_obj_phrase_embeddings = torch.cat((hallu_obj_phrase_embeddings, hallu_text_aggr_embedding), dim=0)
+            if len(hallu_obj_phrase_embeddings) > 0:
+                hallu_obj_phrase_embeddings = self.model.contrastive_text_projector(hallu_obj_phrase_embeddings)
+            gather_hallu_obj_phrase_embeddings = all_gather(hallu_obj_phrase_embeddings)  # [bs*num_process*num_hallu_obj_words, hidden_dim]
+            gather_hallu_obj_phrase_embeddings = torch.concat([data.to(device) for data in gather_hallu_obj_phrase_embeddings], dim=0)  # [bs*num_process*num_hallu_obj_words, hidden_dim]
+            gather_obj_phrase_embeddings = torch.cat((gather_obj_phrase_embeddings, gather_hallu_obj_phrase_embeddings), dim=0)  # [bs*num_process*(num_detected_obj + num_hallu_obj_words), hidden_dim]
 
-            if filtered_hallu_obj_phrase_embeddings.shape[0] > 0:
-                hallu_obj_phrase_embeddings = self.model.contrastive_text_projector(filtered_hallu_obj_phrase_embeddings)
-                obj_phrase_embeddings = torch.cat((obj_phrase_embeddings, hallu_obj_phrase_embeddings), dim=0)
-
-        # TODO: gather the aggr_obj_phrase_embeddings, aggr_obj_tracklet_embeddings, and obj_phrase_embeddings.
-        # TODO: note that the sim_labels should also be modified.
-        
-        sim_v2t = F.normalize(aggr_obj_tracklet_embeddings,dim=-1) @ F.normalize(obj_phrase_embeddings,dim=-1).T / self.model.itc_temp  # [num_obj_words, num_obj_words (+ num_hallu_obj_words)]
-        sim_t2v = F.normalize(aggr_obj_phrase_embeddings,dim=-1) @ F.normalize(aggr_obj_tracklet_embeddings,dim=-1).T / self.model.itc_temp  # [num_obj_words, num_obj_words]
-        
-        num_obj_words, device = aggr_obj_tracklet_embeddings.size(0), aggr_obj_tracklet_embeddings.device
-        sim_labels = torch.arange(num_obj_words, dtype=torch.long).to(device)
+        sim_v2t = F.normalize(obj_tracklet_embeddings,dim=-1) @ F.normalize(gather_obj_phrase_embeddings,dim=-1).T / self.model.itc_temp  # [bs*num_process*num_obj_words, bs*num_process*(num_obj_words (+ num_hallu_obj_words))]
+        sim_t2v = F.normalize(obj_phrase_embeddings,dim=-1) @ F.normalize(gather_obj_tracklet_embeddings,dim=-1).T / self.model.itc_temp  # [bs*num_process*num_obj_words, bs*num_process*num_obj_words]
+        rank = dist.get_rank()
+        gather_num_obj_words = all_gather(obj_tracklet_embeddings.size(0))
+        acum_num_obj_words = [0]
+        for i in range(len(gather_num_obj_words) - 1):
+            acum_num_obj_words.append(acum_num_obj_words[-1] + gather_num_obj_words[i])
+        sim_labels = torch.arange(acum_num_obj_words[rank], acum_num_obj_words[rank] + obj_tracklet_embeddings.size(0), dtype=torch.long).to(device)
         
         loss_v2t_vtfc = F.cross_entropy(sim_v2t, sim_labels, label_smoothing=0.1)
         loss_t2v_vtfc = F.cross_entropy(sim_t2v, sim_labels, label_smoothing=0.1)
