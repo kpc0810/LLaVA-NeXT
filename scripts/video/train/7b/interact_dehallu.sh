@@ -37,10 +37,11 @@ echo "MID_RUN_NAME: ${MID_RUN_NAME}"
 
 ################ Noticed Parameters ##############
 n_node=1
-nproc_per_node=8
+nproc_per_node=1
 output_dir="/home/kaipoc/personal/research_vh/LLaVA-NeXT/checkpoints/exps/debug"
 dehallu_finetune=True
 cp_lr=1e-4
+as_lr=1e-4
 vccl_wt=1.0
 tpocl_wt=1.0
 tpacl_wt=1.0
@@ -75,7 +76,7 @@ torchrun --nproc_per_node="${nproc_per_node}" --nnodes="${n_node}" --node_rank="
     --num_train_epochs 1 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 4 \
-    --gradient_accumulation_steps 2 \
+    --gradient_accumulation_steps 1 \
     --evaluation_strategy "no" \
     --save_strategy "steps" \
     --save_steps 500 \
@@ -102,6 +103,8 @@ torchrun --nproc_per_node="${nproc_per_node}" --nnodes="${n_node}" --node_rank="
     --dehallu_finetune "${dehallu_finetune}" \
     --contrastive_projector_lr "${cp_lr}" \
     --contrastive_projector_weight_decay 0.05 \
+    --act_squeezer_lr "${as_lr}" \
+    --act_squeezer_weight_decay 0.05 \
     --vccl_wt "${vccl_wt}" \
     --tpocl_wt "${tpocl_wt}" \
     --tpacl_wt "${tpacl_wt}" \

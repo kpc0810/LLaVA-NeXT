@@ -616,7 +616,7 @@ def train(attn_implementation=None):
         model.config.mm_use_im_patch_token = model_args.mm_use_im_patch_token
         model.initialize_vision_tokenizer(model_args, tokenizer=tokenizer)
         
-        # extra contrastive projector config
+        # extra contrastive projector and act squeezer config
         if training_args.dehallu_finetune:
             assert training_args.vccl_wt + training_args.tpocl_wt + training_args.tpacl_wt > 0, "vccl_wt, tpocl_wt, tpacl_wt must be greater than 0 when dehallu_finetune is True"
             model.config.tune_contrastive_projector = True
@@ -627,6 +627,9 @@ def train(attn_implementation=None):
             model.config.tpacl_wt = training_args.tpacl_wt
             # extra config for hallu negative sampling on the fly
             model.config.use_hard_neg = training_args.use_hard_neg
+            # config for act squeezer
+            model.config.act_squeezer_lr = training_args.act_squeezer_lr
+            model.config.act_squeezer_weight_decay = training_args.act_squeezer_weight_decay
 
     if training_args.bits in [4, 8]:
         from peft.tuners.lora import LoraLayer

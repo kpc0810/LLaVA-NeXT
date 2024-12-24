@@ -43,9 +43,10 @@ export NCCL_DEBUG=INFO
 export NCCL_DEBUG_SUBSYS=ALL
 export NCCL_ASYNC_ERROR_HANDLING=1
 export NCCL_CUMEM_ENABLE=0
-# export NCCL_P2P_DISABLE=1
-# export NCCL_IB_TIMEOUT=22
+# export DS_SKIP_CUDA_CHECK=1
+export NCCL_P2P_DISABLE=1
 # export NCCL_SHM_DISABLE=1
+# export NCCL_IB_TIMEOUT=22
 
 master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 port=$(( ( $SLURM_JOB_ID % 10000 ) + 20000 ))
@@ -75,10 +76,11 @@ vt_lr=${5}
 bs_per_device=${6}
 dehallu_finetune=${7}   
 cp_lr=${8}
-vccl_wt=${9}
-tpocl_wt=${10}
-tpacl_wt=${11}
-use_hard_neg=${12}
+as_lr=${9}
+vccl_wt=${10}
+tpocl_wt=${11}
+tpacl_wt=${12}
+use_hard_neg=${13}
 report_to="wandb"
 
 echo "total workers: ${n_node}"
@@ -111,8 +113,8 @@ torchrun --nproc_per_node=8 --nnodes="${SLURM_JOB_NUM_NODES}" --node_rank="${CUR
     --output_dir "${output_dir}" \
     --num_train_epochs "${num_train_epochs}" \
     --per_device_train_batch_size "${bs_per_device}" \
-    --per_device_eval_batch_size 4 \
-    --gradient_accumulation_steps 2 \
+    --per_device_eval_batch_size 1 \
+    --gradient_accumulation_steps 1 \
     --evaluation_strategy "no" \
     --save_strategy "steps" \
     --save_steps 40 \
@@ -139,6 +141,8 @@ torchrun --nproc_per_node=8 --nnodes="${SLURM_JOB_NUM_NODES}" --node_rank="${CUR
     --dehallu_finetune "${dehallu_finetune}" \
     --contrastive_projector_lr "${cp_lr}" \
     --contrastive_projector_weight_decay 0.05 \
+    --act_squeezer_lr "${as_lr}" \
+    --act_squeezer_weight_decay 0.05 \
     --vccl_wt "${vccl_wt}" \
     --tpocl_wt "${tpocl_wt}" \
     --tpacl_wt "${tpacl_wt}" \

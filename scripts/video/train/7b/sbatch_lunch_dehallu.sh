@@ -17,6 +17,7 @@ vt_lr=$(grep '^vt_lr' "$CONFIG_FILE" | awk -F ' = ' '{print $2}')
 bs_per_device=$(grep '^bs_per_device' "$CONFIG_FILE" | awk -F ' = ' '{print $2}')
 dehallu_finetune=$(grep '^dehallu_finetune' "$CONFIG_FILE" | awk -F ' = ' '{print $2}')
 cp_lr=$(grep '^cp_lr' "$CONFIG_FILE" | awk -F ' = ' '{print $2}')
+as_lr=$(grep '^as_lr' "$CONFIG_FILE" | awk -F ' = ' '{print $2}')
 vccl_wt=$(grep '^vccl_wt' "$CONFIG_FILE" | awk -F ' = ' '{print $2}')
 tpocl_wt=$(grep '^tpocl_wt' "$CONFIG_FILE" | awk -F ' = ' '{print $2}')
 tpacl_wt=$(grep '^tpacl_wt' "$CONFIG_FILE" | awk -F ' = ' '{print $2}')
@@ -38,6 +39,7 @@ for i in $(seq 1 $total_runs); do
     "${bs_per_device}" \
     "${dehallu_finetune}" \
     "${cp_lr}" \
+    "${as_lr}" \
     "${vccl_wt}" \
     "${tpocl_wt}" \
     "${tpacl_wt}" \

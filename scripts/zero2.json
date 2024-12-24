@@ -32,6 +32,7 @@
         "reduce_bucket_size": 2e8,
         "contiguous_gradients": true
     },
+    "zero_allow_untested_optimizer": true,
     "gradient_accumulation_steps": "auto",
     "gradient_clipping": "auto",
     "steps_per_print": 100,
