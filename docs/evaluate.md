@@ -58,17 +58,25 @@ required license, already available in ORD
 ```
 bash scripts/pred/generate_videomme_subtitle.sh <video_path> <srt_path> <output_path>
 ```
+* Please refer to Video-MME's raw data to access video_path and srt_path.
 
 ### Run full code
 ```
 bash scripts/pred/videomme.sh
 ```
-* Please refer to Video-MME's raw data to access video_path and srt_path.
 * You can add --use_subtitle and --subtitle_path to the script to use subtitle information.
 * Change the argument if necessary. The process is identical to DREAM-1K.
 * The output in terminal may be like following (This result will also be saved in a .txt file):
 <img src="videomme.jpg" height="200">
 * prompt template:
 ```
-test
+The video's subtitles are listed below:
+{subtitle}
+Select the best answer to the following multiple-choice question based on the video and the subtitles. Respond with the letter (A, B, C, or D) of the correct option and explain your choice.
+{question}
+A. {choice_A}
+B. {choice_B}
+C. {choice_C}
+D. {choice_D}
+The best answer is:
 ```
