@@ -19,7 +19,6 @@ video_folder="DREAM-1K/video/DREAM-1K_videos"
 output_dir="outputs/dream1k"
 output_name="dream1k_pred_results_"
 question="Please provide a detailed description of the video, focusing on the main subjects, their actions, and the background scenes."
-huggingface_token=""
 
 # CUDA_VISIBLE_DEVICES=0 torchrun llava/eval/dream1k.py \
 torchrun --nnodes="${n_node}" --nproc_per_node="${nproc_per_node}" --master_port=51466 \
@@ -33,14 +32,4 @@ torchrun --nnodes="${n_node}" --nproc_per_node="${nproc_per_node}" --master_port
     --conv-mode "qwen_1_5" \
     --frames_upbound 64 \
     --question "${question}" \
-
-# export PATH=/mnt/home/kaipoc/miniconda3/envs/llava/bin:$PATH
-# which huggingface-cli
-# huggingface-cli login --token $huggingface_token
-
-# python3 llava/eval/dream1k_llama_eval.py \
-#     --pred_file "${output_dir}/${output_name}.jsonl" \
-#     --output_dir "${output_dir}" \
-#     --dataset_name "DREAM" \
-#     --model_name "meta-llama/Meta-Llama-3.1-8B-Instruct"
 
