@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --gpus-per-node=8
-#SBATCH --cpus-per-task=64
+#SBATCH --cpus-per-task=32
 #SBATCH --time=4:00:00
 #SBATCH --account=nvr_taiwan_rvos
 #SBATCH --partition=polar4,polar3,polar2,polar,batch_block1,grizzly,batch_block2,batch_block3

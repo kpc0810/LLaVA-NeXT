@@ -1,7 +1,7 @@
 #!/bin/bash
 
-exp_name="llava-qwen-7b_gl_nnode=8_epo=2_plmlr=5e-6_vtlr=1e-6_bspd=1"
-model_path="checkpoints/exps/llava-qwen-7b_ccl-ehn_nnode=8_epo=2_plmlr=5e-6_vtlr=1e-6_bspd=1_cplr=1e-4_vcclwt=0.5_tpoclwt=0.0_tpaclwt=0.0/checkpoint-1200"
+exp_name="llava-qwen-7b_gl_nnode=8_epo=1_plmlr=5e-6_vtlr=1e-6_bspd=1"
+model_path="checkpoints/exps/llava-qwen-7b_gl_nnode=8_epo=1_plmlr=5e-6_vtlr=1e-6_bspd=1/checkpoint-360"
 data_file="/home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/final_miradata_9k_test_dataset.csv"
 video_folder="/home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/video/clip_video"
 output_dir="outputs/miradata/pred_results/__debug"

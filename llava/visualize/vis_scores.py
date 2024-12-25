@@ -50,6 +50,6 @@ def main(exp_name):
             plot_metric(metric, metric_scores, vis_dir, exp_name)
 
 if __name__ =="__main__":
-    exp_name = "vila3b_gl_nnode=8_bs-per-device=16_epoch=1_vilalr=1e-4"  # This is the only one param need to be changed
+    exp_name = "llava-qwen-7b_gl_nnode=8_epo=1_plmlr=5e-6_vtlr=1e-6_bspd=1"  # This is the only one param need to be changed
     main(exp_name)
-    print("Done!")
+    print(f"Done for {exp_name}!")

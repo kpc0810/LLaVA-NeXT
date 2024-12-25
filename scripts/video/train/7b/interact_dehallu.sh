@@ -37,7 +37,7 @@ echo "MID_RUN_NAME: ${MID_RUN_NAME}"
 
 ################ Noticed Parameters ##############
 n_node=1
-nproc_per_node=1
+nproc_per_node=8
 output_dir="/home/kaipoc/personal/research_vh/LLaVA-NeXT/checkpoints/exps/debug"
 dehallu_finetune=True
 cp_lr=1e-4
