@@ -23,7 +23,10 @@ except ImportError:
     print("Please install pyav to use video processing functions.")
 
 def process_video_with_decord(video_file, data_args):
-    vr = VideoReader(video_file, ctx=cpu(0), num_threads=1)
+    try:
+        vr = VideoReader(video_file, ctx=cpu(0), num_threads=0)
+    except:
+        vr = VideoReader(video_file, ctx=cpu(0), num_threads=1)
     total_frame_num = len(vr)
     video_time = total_frame_num / vr.get_avg_fps()
     avg_fps = round(vr.get_avg_fps() / data_args.video_fps)
