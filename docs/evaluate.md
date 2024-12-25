@@ -68,6 +68,7 @@ bash scripts/pred/videomme.sh
 * Change the argument if necessary. The process is identical to DREAM-1K.
 * The output in terminal may be like following (This result will also be saved in a .txt file):
 <img src="videomme.jpg" height="200">
+
 * prompt template:
 ```
 The video's subtitles are listed below:
