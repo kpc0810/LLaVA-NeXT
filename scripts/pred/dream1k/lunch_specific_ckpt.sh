@@ -15,4 +15,3 @@ sbatch --job-name=pred_${exp_name} \
     "${ckpt_name}" \
     "${output_name}" \
     "${conv_model}"
-  

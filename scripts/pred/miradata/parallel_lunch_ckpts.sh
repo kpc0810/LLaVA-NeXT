@@ -23,9 +23,9 @@ for ((i = 1; i <= num_iterations; i++)); do
             echo "Running inference for $single_ckpt_dir with output name $pred_filename!"
 
             sbatch \
-            --job-name=${pred_filename} \
-            --output="${work_dir}/slurm_log/pred/${exp_name}/${pred_filename}.txt" \
-            --error="${work_dir}/slurm_error/pred/${exp_name}/${pred_filename}.txt" \
+            --job-name="${pred_filename}_miradata" \
+            --output="${work_dir}/slurm_log/pred/miradata/${exp_name}/${pred_filename}.txt" \
+            --error="${work_dir}/slurm_error/pred/miradata/${exp_name}/${pred_filename}.txt" \
             scripts/pred/miradata/sbatch_single_ckpt.sh "${single_ckpt_dir}" "${pred_filename}" "${conv_mode}"
 
         fi

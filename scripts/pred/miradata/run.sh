@@ -1,5 +1,5 @@
 #!/bin/bash
-source /lustre/fsw/portfolios/nvr/users/${USER}/miniconda3/bin/activate llava-eval
+source /lustre/fsw/portfolios/nvr/users/${USER}/miniconda3/bin/activate llava
 which conda
 which scontrol
 which torchrun

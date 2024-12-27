@@ -11,6 +11,8 @@ source /lustre/fsw/portfolios/nvr/users/${USER}/miniconda3/bin/activate vila-eva
 which conda
 conda activate llava-eval
 
+cd /home/kaipoc/personal/research_vh/LLaVA-NeXT
+
 pred_data_dir=$1
 score_data_dir=$2
 pred_file=$3
