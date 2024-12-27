@@ -30,20 +30,23 @@ nvidia-smi
 export DECORD_DUPLICATE_WARNING_THRESHOLD=1.0
 export OMP_NUM_THREADS=1
 export NCCL_BLOCKING_WAIT=0
-# export NCCL_P2P_DISABLE=1
 export NCCL_IB_SL=0
 export NCCL_IB_TC=41
 export NCCL_TIMEOUT_MS=7200000
 export NCCL_IB_GID_INDEX=3
-export NCCL_SOCKET_IFNAME=eth1
 export CUDA_DEVICE_MAX_CONNECTIONS=1
-# export NCCL_IB_DISABLE=0
-# export NCCL_DEBUG=INFO
-# export NCCL_DEBUG_SUBSYS=ALL
-# export NCCL_IB_TIMEOUT=22
-# export NCCL_SOCKET_IFNAME=eth0
-# export NCCL_ASYNC_ERROR_HANDLING=1
+export CUDA_LAUNCH_BLOCKING=1
+export DS_BUILD_OPS=0
+export TORCH_USE_CUDA_DSA=1
+export NCCL_IB_DISABLE=0
+export NCCL_DEBUG=INFO
+export NCCL_DEBUG_SUBSYS=ALL
+export NCCL_ASYNC_ERROR_HANDLING=1
+export NCCL_CUMEM_ENABLE=0
+# export DS_SKIP_CUDA_CHECK=1
+export NCCL_P2P_DISABLE=1
 # export NCCL_SHM_DISABLE=1
+# export NCCL_IB_TIMEOUT=22
 
 master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 port=$(( ( $SLURM_JOB_ID % 10000 ) + 20000 ))
@@ -73,10 +76,11 @@ vt_lr=${5}
 bs_per_device=${6}
 dehallu_finetune=${7}   
 cp_lr=${8}
-vccl_wt=${9}
-tpocl_wt=${10}
-tpacl_wt=${11}
-use_hard_neg=${12}
+as_lr=${9}
+vccl_wt=${10}
+tpocl_wt=${11}
+tpacl_wt=${12}
+use_hard_neg=${13}
 report_to="wandb"
 
 echo "total workers: ${n_node}"
@@ -93,7 +97,7 @@ torchrun --nproc_per_node=8 --nnodes="${SLURM_JOB_NUM_NODES}" --node_rank="${CUR
     --data_path "/home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/seg64_fixed_parsed_data/seg64_merged_miradata_84k_train_dataset.csv" \
     --image_folder "/home/kaipoc/personal/research_vh/NULL" \
     --video_folder "/home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/video/clip_video" \
-    --mm_tunable_parts "mm_mlp_adapter,mm_language_model,contrastive_projector" \
+    --mm_tunable_parts "mm_mlp_adapter,mm_language_model,contrastive_projector,act_squeezer" \
     --mm_vision_tower_lr "${vt_lr}" \
     --vision_tower "${VISION_MODEL_VERSION}" \
     --mm_projector_type mlp2x_gelu \
@@ -109,11 +113,11 @@ torchrun --nproc_per_node=8 --nnodes="${SLURM_JOB_NUM_NODES}" --node_rank="${CUR
     --output_dir "${output_dir}" \
     --num_train_epochs "${num_train_epochs}" \
     --per_device_train_batch_size "${bs_per_device}" \
-    --per_device_eval_batch_size 4 \
-    --gradient_accumulation_steps 2 \
+    --per_device_eval_batch_size 1 \
+    --gradient_accumulation_steps 1 \
     --evaluation_strategy "no" \
     --save_strategy "steps" \
-    --save_steps 80 \
+    --save_steps 40 \
     --save_total_limit 30 \
     --learning_rate "${plm_lr}" \
     --weight_decay 0. \
@@ -137,6 +141,8 @@ torchrun --nproc_per_node=8 --nnodes="${SLURM_JOB_NUM_NODES}" --node_rank="${CUR
     --dehallu_finetune "${dehallu_finetune}" \
     --contrastive_projector_lr "${cp_lr}" \
     --contrastive_projector_weight_decay 0.05 \
+    --act_squeezer_lr "${as_lr}" \
+    --act_squeezer_weight_decay 0.05 \
     --vccl_wt "${vccl_wt}" \
     --tpocl_wt "${tpocl_wt}" \
     --tpacl_wt "${tpacl_wt}" \

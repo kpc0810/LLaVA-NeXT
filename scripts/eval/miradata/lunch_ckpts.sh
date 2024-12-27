@@ -15,9 +15,9 @@ for pred_file in $all_pred_files; do
     echo "Running inference for $pred_file and save score to $score_file!"
 
     sbatch \
-    --job-name=vdo_hallu_eval \
-    --output=/home/kaipoc/personal/research_vh/LLaVA-NeXT/slurm_log/eval/${exp_name}/${pred_file}.txt \
-    --error=/home/kaipoc/personal/research_vh/LLaVA-NeXT/slurm_error/eval/${exp_name}/${pred_file}.txt \
+    --job-name=vdo_hallu_eval_miradata \
+    --output=/home/kaipoc/personal/research_vh/LLaVA-NeXT/slurm_log/eval/miradata/${exp_name}/${pred_file}.txt \
+    --error=/home/kaipoc/personal/research_vh/LLaVA-NeXT/slurm_error/eval/miradata/${exp_name}/${pred_file}.txt \
     scripts/eval/miradata/sbatch_single_ckpt.sh \
     "$pred_data_dir" \
     "$score_data_dir" \

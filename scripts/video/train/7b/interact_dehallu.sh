@@ -41,9 +41,10 @@ nproc_per_node=8
 output_dir="/home/kaipoc/personal/research_vh/LLaVA-NeXT/checkpoints/exps/debug"
 dehallu_finetune=True
 cp_lr=1e-4
+as_lr=1e-4
 vccl_wt=1.0
 tpocl_wt=1.0
-tpacl_wt=0.0
+tpacl_wt=1.0
 use_hard_neg=True
 
 echo "master ip: ${master_addr}"
@@ -55,10 +56,10 @@ torchrun --nproc_per_node="${nproc_per_node}" --nnodes="${n_node}" --node_rank="
     --deepspeed scripts/zero2.json \
     --model_name_or_path "$PREV_STAGE_CHECKPOINT" \
     --version "$PROMPT_VERSION" \
-    --data_path "/home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/seg64_fixed_parsed_data/84k_train_split_1.csv" \
+    --data_path "/home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/seg64_fixed_parsed_data/seg64_merged_miradata_84k_train_dataset.csv" \
     --image_folder /home/kaipoc/personal/research_vh/NULL \
     --video_folder /home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/video/clip_video \
-    --mm_tunable_parts="mm_mlp_adapter,mm_language_model,contrastive_projector" \
+    --mm_tunable_parts="mm_mlp_adapter,mm_language_model,contrastive_projector,act_squeezer" \
     --mm_vision_tower_lr=2e-6 \
     --vision_tower "${VISION_MODEL_VERSION}" \
     --mm_projector_type mlp2x_gelu \
@@ -75,7 +76,7 @@ torchrun --nproc_per_node="${nproc_per_node}" --nnodes="${n_node}" --node_rank="
     --num_train_epochs 1 \
     --per_device_train_batch_size 1 \
     --per_device_eval_batch_size 4 \
-    --gradient_accumulation_steps 2 \
+    --gradient_accumulation_steps 1 \
     --evaluation_strategy "no" \
     --save_strategy "steps" \
     --save_steps 500 \
@@ -102,6 +103,8 @@ torchrun --nproc_per_node="${nproc_per_node}" --nnodes="${n_node}" --node_rank="
     --dehallu_finetune "${dehallu_finetune}" \
     --contrastive_projector_lr "${cp_lr}" \
     --contrastive_projector_weight_decay 0.05 \
+    --act_squeezer_lr "${as_lr}" \
+    --act_squeezer_weight_decay 0.05 \
     --vccl_wt "${vccl_wt}" \
     --tpocl_wt "${tpocl_wt}" \
     --tpacl_wt "${tpacl_wt}" \

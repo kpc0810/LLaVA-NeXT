@@ -7,6 +7,7 @@ from collections import defaultdict
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--pred_file", type=str, default="outputs/videomme/videomme_nosub.jsonl")
+    parser.add_argument("--score_file", type=str, default="outputs/videomme/videomme_nosub_score.json")
     parser.add_argument("--gt_file", type=str, default="playground/videomme/qa_old_format.json")
     return parser.parse_args()
 
@@ -52,7 +53,7 @@ def main(args):
     print(table)
     
     # Save the table to a file
-    with open(args.pred_file.replace('.jsonl', '_results.json'), 'w') as f:
+    with open(args.score_file, 'w') as f:
         json.dump(out, f, indent=4)
     
 

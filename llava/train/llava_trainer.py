@@ -20,10 +20,14 @@ from typing import List, Optional
 from datetime import timedelta
 
 from functools import partial
-from typing import Dict
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
 from llava.model.mixin import MultiTaskModuleMixin
 from llava.train.utils import TrainLoggingState
 from llava.utils import rank0_breakpoint
+
+from accelerate.utils import is_deepspeed_available
+if is_deepspeed_available():
+    from accelerate.utils import DummyOptim
 
 if is_accelerate_available():
     from accelerate import Accelerator, skip_first_batches, InitProcessGroupKwargs
@@ -265,7 +269,11 @@ class LLaVATrainer(Trainer):
             model.apply(patch_report_metrics)
                 
         super().__init__(*args, **kwargs)
-
+    
+    def training_step(self, model: nn.Module, inputs: Dict[str, Union[torch.Tensor, Any]]) -> torch.Tensor:
+        torch.cuda.empty_cache()
+        return super().training_step(model, inputs)
+    
     def log(self, logs: Dict[str, float]) -> None:
         if self.state.epoch is not None:
             logs["epoch"] = self.state.epoch
@@ -406,6 +414,66 @@ class LLaVATrainer(Trainer):
 
         return dataloader
 
+    def _get_optimizer_grouped_parameters(self, opt_model):
+        decay_parameters = get_parameter_names(opt_model, ALL_LAYERNORM_LAYERS)
+        decay_parameters = [name for name in decay_parameters if "bias" not in name]
+        lr_mapper, wd_mapper = {}, {}
+        if self.args.mm_projector_lr is not None:
+            lr_mapper["mm_projector"] = self.args.mm_projector_lr
+            wd_mapper["mm_projector"] = self.args.weight_decay
+        if self.args.mm_vision_tower_lr is not None:
+            lr_mapper["vision_tower"] = self.args.mm_vision_tower_lr
+            wd_mapper["vision_tower"] = self.args.weight_decay
+        if self.args.contrastive_projector_lr is not None:
+            lr_mapper["contrastive_vision_projector"] = self.args.contrastive_projector_lr
+            lr_mapper["contrastive_text_projector"] = self.args.contrastive_projector_lr
+            wd_mapper["contrastive_vision_projector"] = self.args.contrastive_projector_weight_decay
+            wd_mapper["contrastive_text_projector"] = self.args.contrastive_projector_weight_decay
+        if self.args.act_squeezer_lr is not None:
+            lr_mapper["act_squeezer"] = self.args.act_squeezer_lr
+            wd_mapper["act_squeezer"] = self.args.act_squeezer_weight_decay
+        if len(lr_mapper) > 0:
+            special_lr_parameters = [name for name, _ in opt_model.named_parameters() if any(module_keyword in name for module_keyword in lr_mapper)]
+            optimizer_grouped_parameters = [
+                {
+                    "params": [p for n, p in opt_model.named_parameters() if (n in decay_parameters and n not in special_lr_parameters and p.requires_grad)],
+                    "weight_decay": self.args.weight_decay,
+                },
+                {
+                    "params": [p for n, p in opt_model.named_parameters() if (n not in decay_parameters and n not in special_lr_parameters and p.requires_grad)],
+                    "weight_decay": 0.0,
+                },
+            ]
+            for module_keyword, lr in lr_mapper.items():
+                wd = wd_mapper.get(module_keyword, self.args.weight_decay)
+                module_parameters = [name for name, _ in opt_model.named_parameters() if module_keyword in name]
+                optimizer_grouped_parameters.extend(
+                    [
+                        {
+                            "params": [p for n, p in opt_model.named_parameters() if (n in decay_parameters and n in module_parameters and p.requires_grad)],
+                            "weight_decay": wd,
+                            "lr": lr,
+                        },
+                        {
+                            "params": [p for n, p in opt_model.named_parameters() if (n not in decay_parameters and n in module_parameters and p.requires_grad)],
+                            "weight_decay": 0.0,
+                            "lr": lr,
+                        },
+                    ]
+                )
+        else:
+            optimizer_grouped_parameters = [
+                {
+                    "params": [p for n, p in opt_model.named_parameters() if (n in decay_parameters and p.requires_grad)],
+                    "weight_decay": self.args.weight_decay,
+                },
+                {
+                    "params": [p for n, p in opt_model.named_parameters() if (n not in decay_parameters and p.requires_grad)],
+                    "weight_decay": 0.0,
+                },
+            ]
+        return optimizer_grouped_parameters
+    
     def create_optimizer(self):
         """
         Setup the optimizer.
@@ -413,114 +481,18 @@ class LLaVATrainer(Trainer):
         We provide a reasonable default that works well. If you want to use something else, you can pass a tuple in the
         Trainer's init through `optimizers`, or subclass and override this method in a subclass.
         """
+
         if is_sagemaker_mp_enabled():
             return super().create_optimizer()
 
         opt_model = self.model
+        
+        # specify different learning rate for different modules under deepspeed training env.
+        if isinstance(self.optimizer, DummyOptim):
+            self.optimizer.params = self._get_optimizer_grouped_parameters(opt_model)
 
         if self.optimizer is None:
-            decay_parameters = get_parameter_names(opt_model, ALL_LAYERNORM_LAYERS)
-            decay_parameters = [name for name in decay_parameters if "bias" not in name]
-            lr_mapper = {}
-            if self.args.mm_projector_lr is not None:
-                lr_mapper["mm_projector"] = self.args.mm_projector_lr
-            if self.args.mm_vision_tower_lr is not None:
-                lr_mapper["vision_tower"] = self.args.mm_vision_tower_lr
-            if len(lr_mapper) > 0:
-                special_lr_parameters = [name for name, _ in opt_model.named_parameters() if any(module_keyword in name for module_keyword in lr_mapper)]
-                optimizer_grouped_parameters = [
-                    {
-                        "params": [p for n, p in opt_model.named_parameters() if (n in decay_parameters and n not in special_lr_parameters and p.requires_grad)],
-                        "weight_decay": self.args.weight_decay,
-                    },
-                    {
-                        "params": [p for n, p in opt_model.named_parameters() if (n not in decay_parameters and n not in special_lr_parameters and p.requires_grad)],
-                        "weight_decay": 0.0,
-                    },
-                ]
-                for module_keyword, lr in lr_mapper.items():
-                    module_parameters = [name for name, _ in opt_model.named_parameters() if module_keyword in name]
-                    optimizer_grouped_parameters.extend(
-                        [
-                            {
-                                "params": [p for n, p in opt_model.named_parameters() if (n in decay_parameters and n in module_parameters and p.requires_grad)],
-                                "weight_decay": self.args.weight_decay,
-                                "lr": lr,
-                            },
-                            {
-                                "params": [p for n, p in opt_model.named_parameters() if (n not in decay_parameters and n in module_parameters and p.requires_grad)],
-                                "weight_decay": 0.0,
-                                "lr": lr,
-                            },
-                        ]
-                    )
-            else:
-                optimizer_grouped_parameters = [
-                    {
-                        "params": [p for n, p in opt_model.named_parameters() if (n in decay_parameters and p.requires_grad)],
-                        "weight_decay": self.args.weight_decay,
-                    },
-                    {
-                        "params": [p for n, p in opt_model.named_parameters() if (n not in decay_parameters and p.requires_grad)],
-                        "weight_decay": 0.0,
-                    },
-                ]
-
-            if self.args.contrastive_projector_lr is not None:
-                projector_parameters = [name for name, _ in opt_model.named_parameters() if "contrastive_vision_projector" in name or "contrastive_text_projector" in name]
-                optimizer_grouped_parameters = [
-                    {
-                        "params": [
-                            p
-                            for n, p in opt_model.named_parameters()
-                            if (n in decay_parameters and n not in projector_parameters and p.requires_grad)
-                        ],
-                        "weight_decay": self.args.contrastive_projector_weight_decay,
-                    },
-                    {
-                        "params": [
-                            p
-                            for n, p in opt_model.named_parameters()
-                            if (n not in decay_parameters and n not in projector_parameters and p.requires_grad)
-                        ],
-                        "weight_decay": 0.0,
-                    },
-                    {
-                        "params": [
-                            p
-                            for n, p in opt_model.named_parameters()
-                            if (n in decay_parameters and n in projector_parameters and p.requires_grad)
-                        ],
-                        "weight_decay": self.args.contrastive_projector_weight_decay,
-                        "lr": self.args.contrastive_projector_lr,
-                    },
-                    {
-                        "params": [
-                            p
-                            for n, p in opt_model.named_parameters()
-                            if (n not in decay_parameters and n in projector_parameters and p.requires_grad)
-                        ],
-                        "weight_decay": 0.0,
-                        "lr": self.args.contrastive_projector_lr,
-                    },
-                ]
-            else:
-                optimizer_grouped_parameters = [
-                    {
-                        "params": [
-                            p for n, p in opt_model.named_parameters() if (n in decay_parameters and p.requires_grad)
-                        ],
-                        "weight_decay": self.args.contrastive_projector_weight_decay,
-                    },
-                    {
-                        "params": [
-                            p
-                            for n, p in opt_model.named_parameters()
-                            if (n not in decay_parameters and p.requires_grad)
-                        ],
-                        "weight_decay": 0.0,
-                    },
-                ]
+            optimizer_grouped_parameters = self._get_optimizer_grouped_parameters(opt_model)            
             optimizer_cls, optimizer_kwargs = Trainer.get_optimizer_cls_and_kwargs(self.args)
 
             self.optimizer = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)

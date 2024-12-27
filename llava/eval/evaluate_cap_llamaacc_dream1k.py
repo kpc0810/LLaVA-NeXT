@@ -15,12 +15,16 @@ import json
 import numpy as np
 import ast
 import time
+import math
 from typing import List, Dict
+import torch.distributed
 from tqdm import tqdm
 import func_timeout
 from func_timeout import func_set_timeout
+from datetime import timedelta
 import argparse
 from collections import defaultdict
+from tqdm import tqdm
 
 # from tools.gpt_api import azure_gpt4_client
 # import openai
@@ -30,8 +34,10 @@ from copy import deepcopy
 from traceback import format_exc
 import transformers
 import torch
+import torch.multiprocessing as mp
 from huggingface_hub import login
 
+TEMP_RESULT_TEMPLATE = "tmp_llama_results_{}.json"
 
 def count_f1(r, p):
     return 2*r*p/(r+p)
@@ -285,17 +291,20 @@ def process_one_sample(model, inputs, verbose=False):
     return {'success': True, 'result': result, 'data': inputs}
 
 class DREAMGPTMetric:
-    def __init__(self, dataset_name, model_name, verbose=False) -> None:
+    def __init__(self, dataset_name, model_name, device=0, verbose=False) -> None:
         
         self.dataset_name = dataset_name
         self.num_worker = 64
-        self.model = transformers.pipeline(
-            "text-generation",
-            model=model_name,
-            model_kwargs={"torch_dtype": torch.bfloat16},
-            device_map="auto",
-            temperature = 0.3,
-        )
+        if model_name is None:
+            self.model = None
+        else:
+            self.model = transformers.pipeline(
+                "text-generation",
+                model=model_name,
+                model_kwargs={"torch_dtype": torch.bfloat16},
+                device=device,
+                temperature = 0.3,
+            )
         self.results = []
         self.invalid_results = []
         self.dataset = []
@@ -329,7 +338,8 @@ class DREAMGPTMetric:
         self._process_group_by_subtask(dataset)
     
     def _process(self, dataset: List[Dict], subtask=None):
-        for sample in dataset:
+        for sample in tqdm(dataset):
+            print("processing sample", sample['idx'])
             result = process_one_sample(self.model, sample, verbose=self.verbose)
             if subtask:
                 result['subtask'] = subtask
@@ -448,7 +458,22 @@ class DREAMGPTMetric:
         for bucket_info in self.bucket_tables:
             print(bucket_info)
         fout.close()
-    
+
+    def save_results_to_json(self, score_path):
+        output_dir = os.path.dirname(score_path)
+        os.makedirs(output_dir, exist_ok=True)
+        
+        results = {row[0]: {} for row in self.table._rows}
+        target_fieldnames = ['F1 Score', 'Action Recall', 'Action Precision']
+        for row in self.table._rows:
+            task_name, f1, action_recall, action_precision, _, _ = row
+            field2score = {'F1 Score': f1, 'Action Recall': action_recall, 'Action Precision': action_precision}
+            for fieldname in target_fieldnames:
+                results[task_name][fieldname] = field2score[fieldname]
+
+        with open(score_path, 'w') as f:
+            json.dump(results, f, indent=4)
+
     def save_eval_infos(self, pred_path):
         if os.path.isdir(pred_path):
             output_dir = os.path.join(pred_path, 'eval_records')
@@ -461,36 +486,96 @@ class DREAMGPTMetric:
         fout.close()
         print(f"DREAM evaluation information saved in: {os.path.join(output_dir, 'DREAM_eval_infos.jsonl')}", flush=True)
         
+def run_process(args, dataset, local_rank, valid_queue, invalid_queue):
+    
+    metric = DREAMGPTMetric(args.dataset_name, args.model_name, device=local_rank, verbose=False)
+    metric.process(dataset)
+    # for result in metric.results:
+    #     valid_queue.append(result)
+    # for result in metric.invalid_results:
+    #     invalid_queue.append(result)
+    with open(args.temp_path, "w") as f:
+        json.dump({"results": metric.results, "invalid_results": metric.invalid_results}, f)
+    print("Process Finish. Total dataset size:", len(dataset))
+
+def main(main_args):
+    
+    num_gpus = torch.cuda.device_count()
+
+    # valid_queue = mp.Queue()
+    # invalid_queue = mp.Queue()
+    valid_queue = []
+    invalid_queue = []
+        
+    with open(main_args.pred_file, "r") as f:
+        dataset = [json.loads(line) for line in f]
+    if main_args.debug:
+        dataset = dataset[:1]
+    print("Total dataset size:", len(dataset))
+    
+    processes = []
+    for rank in range(num_gpus):
+        
+        start_idx = math.ceil(rank * len(dataset) / num_gpus)
+        end_idx = min(math.ceil((rank + 1) * len(dataset) / num_gpus), len(dataset))
+        main_args.temp_path = os.path.join(main_args.temp_dir, TEMP_RESULT_TEMPLATE.format(rank))
+        print(f"Rank {rank} processing from {start_idx} to {end_idx}")
+        p = mp.Process(
+            target=run_process, 
+            args=(main_args, dataset[start_idx:end_idx], rank, valid_queue, invalid_queue)
+        )
+        p.start()
+        processes.append(p)
+        
+    for p in processes:
+        p.join()
+        
+    # results = []
+    # while not valid_queue.empty():
+    #     results.append(valid_queue.get())
+    # invalid_results = []
+    # while not invalid_queue.empty():
+    #     invalid_results.append(invalid_queue.get())
+    results, invalid_results = [], []
+    for rank in range(num_gpus):
+        tmp = json.load(open(main_args.temp_path, "r"))
+        results.extend(tmp['results'])
+        invalid_results.extend(tmp['invalid_results'])
+        os.remove(main_args.temp_path)
+            
+    eval_metric = DREAMGPTMetric(main_args.dataset_name, model_name=None, device=0, verbose=True)
+    eval_metric.results = results
+    eval_metric.invalid_results = invalid_results
+    eval_metric.summarize_metric()
+    eval_metric.save_results_to_json(main_args.score_file)
+    # eval_metric.save_results(main_args.output_dir)
+    # eval_metric.save_eval_infos(main_args.output_dir)
+    
 
 def argmument():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_name', type=str, default='DREAM')
     parser.add_argument('--pred_file', type=str, default='outputs/dream1k/dream1k_pred_results.jsonl')
-    parser.add_argument('--output_dir', type=str, default='outputs/dream1k')
+    parser.add_argument('--score_file', type=str, default='outputs/dream1k/dream1k_score_results.json')
+    parser.add_argument('--temp_dir', type=str, default='outputs/dream1k/temp_dir')
     parser.add_argument('--model_name', type=str, default='meta-llama/Meta-Llama-3.1-8B-Instruct')
     parser.add_argument('--debug', action='store_true')
-    
     return parser.parse_args()
-        
+
+         
 if __name__ == '__main__':
     
     start_time = time.time()
+    
+    mp.set_start_method('spawn', force=True)
 
     args = argmument()
-    with open(args.pred_file, "r") as f:
-        dataset = [json.loads(line) for line in f]
-    if args.debug:
-        dataset = dataset[:100]
-        
-    metric = DREAMGPTMetric(args.dataset_name, args.model_name, verbose=True)
-    metric.process(dataset)
-    metric.summarize_metric()
-    metric.save_results(args.output_dir)
-    metric.save_eval_infos(args.output_dir)
-
+    main(args)
+    
     end_time = time.time()
     total_seconds = end_time - start_time
     hours = int(total_seconds // 3600)
     minutes = int((total_seconds % 3600) // 60)
     seconds = int(total_seconds % 60)
     print(f"Total runtime: {hours}h {minutes}m {seconds}s")
+    print("Done!")

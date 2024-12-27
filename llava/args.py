@@ -121,6 +121,10 @@ class TrainingArguments(transformers.TrainingArguments):
     contrastive_projector_lr: Optional[float] = None
     contrastive_projector_weight_decay: Optional[float] = None
     use_hard_neg: Optional[bool] = field(default=True)
+    
+    # act squeezer
+    act_squeezer_lr: Optional[float] = None
+    act_squeezer_weight_decay: Optional[float] = None
 
 # @dataclass
 # class EvaluationArguments:

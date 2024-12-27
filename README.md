@@ -96,6 +96,18 @@ pip install flash-attn==2.5.7
 pip uninstall accelerate
 pip install accelerate==0.28.0
 
+# for install llava-eval
+pip install pycocoevalcap
+pip install sentence-transformers==3.1.1
+pip install bert_score
+conda install -c conda-forge spacy==3.7.6 --override-channels -c conda-forge -c defaults
+conda install -c conda-forge cupy==13.3.0 --override-channels -c conda-forge -c defaults
+python -m spacy download en_core_web_sm
+python -m spacy download en_core_web_md
+
+pip install nltk
+pip install numpy==1.26.4
+
 # pip uninstall transformers
 # # install transformers from github, do the following 4 steps
 # git clone https://github.com/huggingface/transformers.git

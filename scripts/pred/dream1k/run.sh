@@ -1,9 +1,9 @@
 #!/bin/bash
-source /lustre/fsw/portfolios/nvr/users/${USER}/miniconda3/bin/activate llava
+source /lustre/fsw/portfolios/nvr/users/${USER}/miniconda3/bin/activate llava-eval
 which conda
 which scontrol
 which torchrun
-conda activate llava-eval
+conda activate llava
 which python
 
 cd /home/kaipoc/personal/research_vh/LLaVA-NeXT/
@@ -41,26 +41,20 @@ frames_upbound=64
 
 # Extract the content inside the first set of square brackets in OUTPUT_NAME
 exp_name=$(echo $OUTPUT_NAME | grep -oP '(?<=\[)[^\]]+(?=\])' | head -n 1)
-output_dir="outputs/miradata/pred_results/${exp_name}"
+output_dir="outputs/dream1k/pred_results/${exp_name}"
 
 # fixed params
-data_file="/home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/final_miradata_9k_test_dataset.csv"
-video_folder="/home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/video/clip_video"
+data_path="playground/DREAM-1K/json/metadata.json"
+video_folder="playground/DREAM-1K/video/DREAM-1K_videos"
 
 torchrun --nnodes="${n_node}" --nproc_per_node=8 --master_port=51466 \
     --master_addr "${MASTER_ADDR}" --node_rank="${CURRENT_RANK}" \
-    llava/eval/model_caption_miradata.py \
+    llava/eval/model_caption_dream1k.py \
     --model-path "${MODEL_PATH}" \
-    --data-file "${data_file}" \
+    --data-file "${data_path}" \
     --video_folder "${video_folder}" \
     --output-dir "${output_dir}" \
     --output-name "${OUTPUT_NAME}" \
     --conv-mode "${CONV_MODE}" \
     --frames_upbound "${frames_upbound}" \
-    --mm_spatial_pool_stride "2" \
-    --image_aspect_ratio "anyres" \
-    --image_grid_pinpoints "[(224, 448), (224, 672), (224, 896), (448, 448), (448, 224), (672, 224), (896, 224)]" \
-    --mm_patch_merge_type "spatial_unpad" \
-    --overwrite "true" \
-    --for_get_frames_num "4" \
-    --load_8bit "false"
+    --question "${question}" \

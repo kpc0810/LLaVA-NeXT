@@ -9,7 +9,7 @@ echo "$work_dir"/checkpoints/exps/"$exp_name"/*/
 
 all_ckpt_dir=$(ls -d "$work_dir"/checkpoints/exps/"$exp_name"/*/ | sort -V)
 
-chmod +x scripts/pred/miradata/sbatch_single_ckpt.sh
+chmod +x scripts/pred/dream1k/sbatch_single_ckpt.sh
 # decide how many iterations to run for each ckpt
 for ((i = 1; i <= num_iterations; i++)); do
     echo "Iteration $i/$num_iterations"
@@ -23,10 +23,10 @@ for ((i = 1; i <= num_iterations; i++)); do
             echo "Running inference for $single_ckpt_dir with output name $pred_filename!"
 
             sbatch \
-            --job-name="${pred_filename}_miradata" \
-            --output="${work_dir}/slurm_log/pred/miradata/${exp_name}/${pred_filename}.txt" \
-            --error="${work_dir}/slurm_error/pred/miradata/${exp_name}/${pred_filename}.txt" \
-            scripts/pred/miradata/sbatch_single_ckpt.sh "${single_ckpt_dir}" "${pred_filename}" "${conv_mode}"
+            --job-name="${pred_filename}_dream1k" \
+            --output="${work_dir}/slurm_log/pred/${exp_name}/dream1k/${pred_filename}.txt" \
+            --error="${work_dir}/slurm_error/pred/${exp_name}/dream1k/${pred_filename}.txt" \
+            scripts/pred/dream1k/sbatch_single_ckpt.sh "${single_ckpt_dir}" "${pred_filename}" "${conv_mode}"
 
         fi
     done
