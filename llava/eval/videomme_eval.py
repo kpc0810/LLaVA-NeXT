@@ -41,16 +41,19 @@ def main(args):
     table.align["Accuracy"] = "c" 
     table.align["Sample Count"] = "c"
     overall = []
+    out = {}
     for category, preds in result.items():
         acc = np.mean(preds) * 100
         table.add_row([category.capitalize(), f"{acc:.2f}%", len(preds)])
         overall.extend(preds)
+        out[category] = acc
     table.add_row(["Overall", f"{np.mean(overall) * 100:.2f}%", len(overall)])
+    out["overall"] = np.mean(overall) * 100
     print(table)
     
     # Save the table to a file
-    with open(args.pred_file.replace('.jsonl', '_results.txt'), 'w') as f:
-        f.write(str(table))
+    with open(args.pred_file.replace('.jsonl', '_results.json'), 'w') as f:
+        json.dump(out, f, indent=4)
     
 
 if __name__ == "__main__":
