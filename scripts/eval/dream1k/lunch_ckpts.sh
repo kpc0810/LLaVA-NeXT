@@ -6,7 +6,6 @@ cd /home/kaipoc/personal/research_vh/LLaVA-NeXT
 work_dir=$(pwd)
 pred_data_dir="outputs/dream1k/pred_results/${exp_name}"
 score_data_dir="outputs/dream1k/scores/${exp_name}"
-temp_data_dir="outputs/dream1k/temp_dir/${exp_name}"
 all_pred_files=$(ls -d "$work_dir"/"$pred_data_dir"/*.jsonl)
 
 chmod +x scripts/eval/dream1k/sbatch_single_ckpt.sh
@@ -21,6 +20,5 @@ for pred_file in $all_pred_files; do
     --error=/home/kaipoc/personal/research_vh/LLaVA-NeXT/slurm_error/eval/dream1k/${exp_name}/${pred_file}.txt \
     scripts/eval/dream1k/sbatch_single_ckpt.sh \
     "${pred_data_dir}/${pred_file}" \
-    "${score_data_dir}/${score_file}" \
-    "${temp_data_dir}"
+    "${score_data_dir}/${score_file}"
 done

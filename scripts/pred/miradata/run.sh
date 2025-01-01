@@ -3,7 +3,7 @@ source /lustre/fsw/portfolios/nvr/users/${USER}/miniconda3/bin/activate llava
 which conda
 which scontrol
 which torchrun
-conda activate llava-eval
+conda activate llava
 which python
 
 cd /home/kaipoc/personal/research_vh/LLaVA-NeXT/

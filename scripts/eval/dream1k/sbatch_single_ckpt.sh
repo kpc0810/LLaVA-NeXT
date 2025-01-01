@@ -15,10 +15,8 @@ cd /home/kaipoc/personal/research_vh/LLaVA-NeXT
 
 pred_file=$1
 score_file=$2
-temp_dir=$3
 
 python3 llava/eval/evaluate_cap_llamaacc_dream1k.py \
     --pred_file "$pred_file" \
     --score_file "$score_file" \
-    --temp_dir "$temp_dir" \
     --dataset_name "DREAM-1K"

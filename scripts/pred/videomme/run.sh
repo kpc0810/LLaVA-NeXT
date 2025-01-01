@@ -42,14 +42,13 @@ frames_upbound=64
 
 # Extract the content inside the first set of square brackets in OUTPUT_NAME
 exp_name=$(echo $OUTPUT_NAME | grep -oP '(?<=\[)[^\]]+(?=\])' | head -n 1)
-output_dir="outputs/videomme/pred_results/${exp_name}"
 
 # fixed params
 data_file="/lustre/fsw/portfolios/nvr/projects/nvr_elm_llm/dataset/Video-MME/qa_old_format.json"
 video_folder="/lustre/fsw/portfolios/nvr/projects/nvr_elm_llm/dataset/Video-MME/videos"
 subtitle_path="playground/videomme/subtitle_txt"
 
-if [ "$use_subtitle" = true ]; then
+if [ "${use_subtitle}" = "true" ] || [ "${use_subtitle}" = "True" ]; then
     output_dir="outputs/videomme/with_subtitles/pred_results/${exp_name}"
     torchrun --nnodes="${n_node}" --nproc_per_node=8 --master_port=51466 \
         --master_addr "${MASTER_ADDR}" --node_rank="${CURRENT_RANK}" \
@@ -61,6 +60,7 @@ if [ "$use_subtitle" = true ]; then
         --output-name "${OUTPUT_NAME}" \
         --conv-mode "${CONV_MODE}" \
         --frames_upbound "${frames_upbound}" \
+        --mm_newline_position "grid" \
         --use_subtitle \
         --subtitle_path "${subtitle_path}"
 else
@@ -74,5 +74,6 @@ else
         --output-dir "${output_dir}" \
         --output-name "${OUTPUT_NAME}" \
         --conv-mode "${CONV_MODE}" \
-        --frames_upbound "${frames_upbound}"
+        --frames_upbound "${frames_upbound}" \
+        --mm_newline_position "grid"
 fi

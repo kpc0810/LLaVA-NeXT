@@ -24,8 +24,8 @@ for ((i = 1; i <= num_iterations; i++)); do
 
             sbatch \
             --job-name="${pred_filename}_dream1k" \
-            --output="${work_dir}/slurm_log/pred/${exp_name}/dream1k/${pred_filename}.txt" \
-            --error="${work_dir}/slurm_error/pred/${exp_name}/dream1k/${pred_filename}.txt" \
+            --output="${work_dir}/slurm_log/pred/dream1k/${exp_name}/${pred_filename}.txt" \
+            --error="${work_dir}/slurm_error/pred/dream1k/${exp_name}/${pred_filename}.txt" \
             scripts/pred/dream1k/sbatch_single_ckpt.sh "${single_ckpt_dir}" "${pred_filename}" "${conv_mode}"
 
         fi

@@ -1,3 +1,4 @@
+import os
 import json
 import numpy as np
 import prettytable
@@ -53,6 +54,8 @@ def main(args):
     print(table)
     
     # Save the table to a file
+    root_dir = os.path.dirname(args.score_file)
+    os.makedirs(root_dir, exist_ok=True)
     with open(args.score_file, 'w') as f:
         json.dump(out, f, indent=4)
     

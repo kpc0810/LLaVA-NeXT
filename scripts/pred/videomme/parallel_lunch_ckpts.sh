@@ -9,11 +9,11 @@ work_dir=$(pwd)
 echo "$work_dir"/checkpoints/exps/"$exp_name"/*/
 
 if [[ "${use_subtitle}" = "true" || "${use_subtitle}" = "True" ]]; then
-    log_dir="${work_dir}/slurm_log/pred/videomme/with_subtitles/pred_results/${exp_name}"
-    error_dir="${work_dir}/slurm_error/pred/videomme/with_subtitles/pred_results/${exp_name}"
+    log_dir="${work_dir}/slurm_log/pred/videomme/with_subtitles/${exp_name}"
+    error_dir="${work_dir}/slurm_error/pred/videomme/with_subtitles/${exp_name}"
 else
-    log_dir="${work_dir}/slurm_log/pred/videomme/without_subtitles/pred_results/${exp_name}"
-    error_dir="${work_dir}/slurm_error/pred/videomme/without_subtitles/pred_results/${exp_name}"
+    log_dir="${work_dir}/slurm_log/pred/videomme/without_subtitles/${exp_name}"
+    error_dir="${work_dir}/slurm_error/pred/videomme/without_subtitles/${exp_name}"
 fi
 
 all_ckpt_dir=$(ls -d "$work_dir"/checkpoints/exps/"$exp_name"/*/ | sort -V)

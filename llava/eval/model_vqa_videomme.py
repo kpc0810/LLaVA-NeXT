@@ -325,37 +325,25 @@ def run_inference(args):
 
         time_instruciton = f"The video lasts for {video_time:.2f} seconds, and {num_frames_to_sample} frames are uniformly sampled from it. These frames are located at {frame_time}.Please answer the following questions related to this video."
         
-        # prompt = ""
-        # if args.use_subtitle:
-        #     prompt += "This video's subtitles are listed below:\n"
-        #     # prompt += "\n\n**Subtitles:**\n"
-        #     with open(os.path.join(args.subtitle_path, f"{youtube_id}.txt"), "r") as f:
-        #         subtitle_text = f.read()
-        #     prompt += f"{subtitle_text}\n\n"
-            
-        # # prompt += "Select the best answer to the following multiple-choice question based on the video. Respond with only the letter (A, B, C, or D) of the correct option."
-        # question = f"{sample['question']}\n"
-        # question += "\n".join(choice for choice in sample["choices"])
-        # question += "\nPlease provide your answer by stating the letter followed by the full option."
-        # # question += "\nPlease respond with only the letter (A, B, C, or D) of the correct option. Answer:"
-        
         # best answer prompt
         subtitles_prompt, subtitle = "", ""
         if args.use_subtitle:
             subtitles_prompt = "This video's subtitles are listed below:\n"
+            option_prompt = "Select the best answer to the following multiple-choice question based on the video. Respond with only the letter (A, B, C, or D) of the correct option."
             with open(os.path.join(args.subtitle_path, f"{youtube_id}.txt"), "r") as f:
                 subtitle = f.read()
+                subtitle = subtitle + "\n"
             # subtitles_prompt = "[The Start of Reference Text]\n{}\n[The End of Reference Text]"
-            
-        # option_prompt = "Select the best answer to the following multiple-choice question based on the video and the subtitles. Respond with only the letter (A, B, C, or D) of the correct option."
-        option_prompt = "Select the best answer to the following multiple-choice question based on the video and the subtitles. Respond with the letter (A, B, C, or D) of the correct option and explain your choice."
+
+        option_prompt = "Select the best answer to the following multiple-choice question based on the video and the subtitles. Respond with only the letter (A, B, C, or D) of the correct option."
         question = sample["question"]
         option = "\n".join([f"{c}" for _, c in enumerate(sample["choices"])])
         question = question + "\n" + option
-        full_prompt = subtitles_prompt + subtitle + "\n" + option_prompt + "\n" + question + "\n" + "The best answer is:"
+        full_prompt = subtitles_prompt + subtitle + option_prompt + "\n" + question + "\n" + "The best answer is: "
         # full_prompt = subtitles_prompt.format(subtitle) + "\n" + option_prompt + "\n" + question + "\n" + "The best answer is:"
         
-        sample["prompt"] = f'{DEFAULT_IMAGE_TOKEN}\n{time_instruciton}\n{full_prompt}'
+        # sample["prompt"] = f'{DEFAULT_IMAGE_TOKEN}\n{time_instruciton}\n{full_prompt}'
+        sample["prompt"] = f'{DEFAULT_IMAGE_TOKEN}\n{full_prompt}'
 
         conv = copy.deepcopy(conv_templates[args.conv_mode])
         conv.append_message(conv.roles[0], sample["prompt"])
