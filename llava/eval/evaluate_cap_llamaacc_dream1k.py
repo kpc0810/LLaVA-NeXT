@@ -16,6 +16,7 @@ import numpy as np
 import ast
 import time
 import math
+import glob
 from typing import List, Dict
 import torch.distributed
 from tqdm import tqdm
@@ -36,6 +37,7 @@ import transformers
 import torch
 import torch.multiprocessing as mp
 from huggingface_hub import login
+from pprint import pprint
 
 TEMP_RESULT_TEMPLATE = "tmp_llama_results_{}.json"
 
@@ -494,7 +496,7 @@ def run_process(args, dataset, local_rank, valid_queue, invalid_queue):
     #     valid_queue.append(result)
     # for result in metric.invalid_results:
     #     invalid_queue.append(result)
-    with open(args.temp_path, "w") as f:
+    with open(args.temp_score_path, "w") as f:
         json.dump({"results": metric.results, "invalid_results": metric.invalid_results}, f)
     print("Process Finish. Total dataset size:", len(dataset))
 
@@ -513,12 +515,16 @@ def main(main_args):
         dataset = dataset[:1]
     print("Total dataset size:", len(dataset))
     
+    root_score_dir = os.path.dirname(main_args.score_file)
+    os.makedirs(root_score_dir, exist_ok=True)
+    score_filename, _ = os.path.splitext(os.path.basename(main_args.score_file))
+    
     processes = []
     for rank in range(num_gpus):
         
         start_idx = math.ceil(rank * len(dataset) / num_gpus)
         end_idx = min(math.ceil((rank + 1) * len(dataset) / num_gpus), len(dataset))
-        main_args.temp_path = os.path.join(main_args.temp_dir, TEMP_RESULT_TEMPLATE.format(rank))
+        main_args.temp_score_path = os.path.join(root_score_dir, f"{score_filename}.temp.{rank}.json")
         print(f"Rank {rank} processing from {start_idx} to {end_idx}")
         p = mp.Process(
             target=run_process, 
@@ -530,18 +536,17 @@ def main(main_args):
     for p in processes:
         p.join()
         
-    # results = []
-    # while not valid_queue.empty():
-    #     results.append(valid_queue.get())
-    # invalid_results = []
-    # while not invalid_queue.empty():
-    #     invalid_results.append(invalid_queue.get())
+    all_files = glob.glob(os.path.join(root_score_dir, "*.json"))
+    pattern = re.compile(rf"{re.escape(score_filename)}\.temp\.\d+\.json")
+    all_temp_score_files = [f for f in all_files if pattern.search(os.path.basename(f))]
+    print(f"Total {len(all_temp_score_files)} temp score files found.")
+    pprint(all_temp_score_files)
     results, invalid_results = [], []
-    for rank in range(num_gpus):
-        tmp = json.load(open(main_args.temp_path, "r"))
+    for temp_score_file in all_temp_score_files:
+        tmp = json.load(open(temp_score_file, "r"))
         results.extend(tmp['results'])
         invalid_results.extend(tmp['invalid_results'])
-        os.remove(main_args.temp_path)
+        os.remove(temp_score_file)
             
     eval_metric = DREAMGPTMetric(main_args.dataset_name, model_name=None, device=0, verbose=True)
     eval_metric.results = results

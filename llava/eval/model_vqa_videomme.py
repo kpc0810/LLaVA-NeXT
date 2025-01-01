@@ -329,13 +329,13 @@ def run_inference(args):
         subtitles_prompt, subtitle = "", ""
         if args.use_subtitle:
             subtitles_prompt = "This video's subtitles are listed below:\n"
-            option_prompt = "Select the best answer to the following multiple-choice question based on the video. Respond with only the letter (A, B, C, or D) of the correct option."
+            option_prompt = "Select the best answer to the following multiple-choice question based on the video and the subtitles. Respond with only the letter (A, B, C, or D) of the correct option."
             with open(os.path.join(args.subtitle_path, f"{youtube_id}.txt"), "r") as f:
                 subtitle = f.read()
                 subtitle = subtitle + "\n"
             # subtitles_prompt = "[The Start of Reference Text]\n{}\n[The End of Reference Text]"
 
-        option_prompt = "Select the best answer to the following multiple-choice question based on the video and the subtitles. Respond with only the letter (A, B, C, or D) of the correct option."
+        option_prompt = "Select the best answer to the following multiple-choice question based on the video. Respond with only the letter (A, B, C, or D) of the correct option."
         question = sample["question"]
         option = "\n".join([f"{c}" for _, c in enumerate(sample["choices"])])
         question = question + "\n" + option
