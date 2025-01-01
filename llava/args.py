@@ -115,12 +115,12 @@ class TrainingArguments(transformers.TrainingArguments):
 
     # contrastive projector
     dehallu_finetune: Optional[bool] = field(default=False)
-    vccl_wt: Optional[float] = None
-    tpocl_wt: Optional[float] = None
-    tpacl_wt: Optional[float] = None
+    vccl_wt: Optional[float] = 0.0
+    tpocl_wt: Optional[float] = 0.0
+    tpacl_wt: Optional[float] = 0.0
     contrastive_projector_lr: Optional[float] = None
     contrastive_projector_weight_decay: Optional[float] = None
-    use_hard_neg: Optional[bool] = field(default=True)
+    use_hard_neg: Optional[bool] = field(default=False)
     
     # act squeezer
     act_squeezer_lr: Optional[float] = None

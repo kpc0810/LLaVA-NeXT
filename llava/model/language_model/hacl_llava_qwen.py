@@ -196,92 +196,6 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
         
         return pool_embeds
     
-    def generate_hallu_captions(self, hallu_input_ids, hallu_attention_mask, block_ids, images, image_sizes, modalities):
-        """
-        Args:
-            hallu_input_ids (List[torch.Tensor]): The input ids of the hallucinated negative.
-            hallu_attention_mask (List[torch.Tensor]): The attention mask of the hallucinated negative.
-            block_ids (List[torch.Tensor]): The block ids of the hallucinated negative.
-            images (List[torch.Tensor]): The images of the hallucinated negative.
-            image_sizes (List[torch.Tensor]): The image sizes of the hallucinated negative.
-            modalities (List[str]): The modalities of the hallucinated negative.
-        Returns:
-            all_hallu_output_ids (torch.Tensor, (bs, seq_len)): The output ids of the hallucinated negative.
-            hallu_pseudo_labels (torch.Tensor, (bs, seq_len)): The pseudo labels of the hallucinated negative for "prepare contrastive hallucination inputs".
-                Note that this pseudo_labels do not have the IGNORE_INDEX on its corresponding timestamps.
-            all_hallu_obj_phrase_indices (List[List[List[int]]], (bs, num_hallu_obj, occupied_token_indices)): The object phrase indices of the hallucinated negative.
-            all_hallu_act_phrase_indices (List[List[List[int]]], (bs, num_hallu_act, occupied_token_indices)): The action phrase indices of the hallucinated negative.
-            all_hallu_obj_words (List[List[str]], (bs, num_hallu_obj)): The object words of the hallucinated negative.
-            all_hallu_act_words (List[List[str]], (bs, num_hallu_act)): The action words of the hallucinated negative.
-        """
-        # rank0_breakpoint()
-        # hallucination decoding
-        all_hallu_output_ids = torch.tensor([], dtype=hallu_input_ids.dtype).to(hallu_input_ids.device)
-        all_hallu_obj_phrase_indices, all_hallu_obj_words = [], []
-        all_hallu_act_phrase_indices, all_hallu_act_words = [], []
-        all_hallu_captions = []
-        
-        with torch.inference_mode():
-            hallu_generated_ids = self.generate(
-                inputs=hallu_input_ids,
-                images=images,
-                image_sizes=image_sizes,
-                modalities=modalities,
-                attention_mask=hallu_attention_mask,
-                do_sample=True,
-                temperature=1.0,
-                max_new_tokens=64,
-                use_cache=True,
-                # below are the parameters for hallucination decoding
-                hallu_decoding=True,
-                block_ids=block_ids,
-                min_new_tokens=20,
-            )
-            
-            # parse the hallu_obj_phrase_indices and hallu_act_phrase_indices from the hallu_generated_ids sample by sample
-            hallu_output_paragraphs = self.tokenizer.batch_decode(hallu_generated_ids, skip_special_tokens=True)
-            for batch_idx, hallu_output_paragraph in enumerate(hallu_output_paragraphs):
-                # enable output caption end with '.'
-                if not hallu_output_paragraph.endswith('.'):
-                    hallu_sents = [sent.strip() for sent in hallu_output_paragraph.split('.')]
-                    hallu_output_paragraph = '. '.join(hallu_sents[:-1]) + '.'
-                
-                hallu_paragraph_ids = self.tokenizer.encode(f"{hallu_output_paragraph}{self.tokenizer.eos_token}\n", add_special_tokens=False)
-                hallu_paragraph_ids = torch.tensor(hallu_paragraph_ids, dtype=hallu_input_ids.dtype).to(hallu_input_ids.device)
-                caption_prefix_length = len(hallu_input_ids[batch_idx])
-                
-                hallu_object_nouns, hallu_action_verbs = parse_object_nouns_and_action_verbs(hallu_output_paragraph)
-                hallu_object_nouns, hallu_obj_phrase_indices = get_phrase_indices(self.tokenizer, hallu_object_nouns, hallu_paragraph_ids, caption_prefix_length)  # (List[List[int]]), [num_obj_words, occupied_token_indices]
-                hallu_action_verbs, hallu_act_phrase_indices = get_phrase_indices(self.tokenizer, hallu_action_verbs, hallu_paragraph_ids, caption_prefix_length)  # (List[List[int]]), [num_act_words, occupied_token_indices]
-                all_hallu_obj_phrase_indices.append(hallu_obj_phrase_indices)
-                all_hallu_act_phrase_indices.append(hallu_act_phrase_indices)
-                all_hallu_obj_words.append(hallu_object_nouns)
-                all_hallu_act_words.append(hallu_action_verbs)
-                all_hallu_captions.append(hallu_output_paragraph)
-                
-                hallu_output_ids = torch.cat((hallu_input_ids[batch_idx], hallu_paragraph_ids), dim=0).unsqueeze(dim=0)  # from [seq_len] to [1, seq_len]
-                
-                # pad the hallu_output_ids to the same length with all_hallu_output_ids, vice versa
-                all_hallu_len = all_hallu_output_ids.shape[-1]
-                cur_hallu_len = hallu_output_ids.shape[-1]
-                if all_hallu_len != 0:
-                    if all_hallu_len < cur_hallu_len:
-                        bs, pad_len = hallu_output_ids.shape[0], cur_hallu_len - all_hallu_len
-                        pad_tensor = torch.full((bs, pad_len,), self.tokenizer.pad_token_id, dtype=hallu_output_ids.dtype).to(hallu_output_ids.device)
-                        all_hallu_output_ids = torch.cat((all_hallu_output_ids, pad_tensor), dim=-1)
-                    else:
-                        bs, pad_len = all_hallu_output_ids.shape[0], all_hallu_len - cur_hallu_len
-                        pad_tensor = torch.full((bs, pad_len,), self.tokenizer.pad_token_id, dtype=all_hallu_output_ids.dtype).to(all_hallu_output_ids.device)
-                        hallu_output_ids = torch.cat((hallu_output_ids, pad_tensor), dim=-1)
-                
-                all_hallu_output_ids = torch.cat((all_hallu_output_ids, hallu_output_ids), dim=0)
-
-        # Note that this pseudo_labels do not have the IGNORE_INDEX on its corresponding timestamps.
-        # This is only used for getting `caption_start_idx` in `prepare_contrastive_inputs_labels_for_multimodal`.
-        hallu_pseudo_labels = all_hallu_output_ids.masked_fill(all_hallu_output_ids == self.tokenizer.pad_token_id, IGNORE_INDEX)  
-        # rank0_breakpoint()
-        return all_hallu_output_ids, hallu_pseudo_labels, all_hallu_obj_phrase_indices, all_hallu_act_phrase_indices, all_hallu_obj_words, all_hallu_act_words
-    
     def compute_vtcc_loss(self, last_hidden_state, hallu_last_hidden_state, new_frame_bounds, new_caption_bounds, hallu_caption_bounds):
         """
         Args:
@@ -336,213 +250,6 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
             aggr_embedding = torch.cat((aggr_embedding, embedding[occupied_indices, :].mean(dim=0).unsqueeze(dim=0)), dim=0)
         return aggr_embedding
     
-    def compute_obj_vtfc_loss(
-        self,
-        last_hidden_state: torch.FloatTensor, 
-        hallu_last_hidden_state: torch.FloatTensor,
-        obj_words: List[List[str]],
-        new_obj_tracklet_indices: List[List[List[int]]],
-        new_obj_phrase_indices: List[List[List[int]]],
-        hallu_obj_words: List[List[str]],
-        hallu_obj_phrase_indices: List[List[List[int]]]
-    ):
-        """
-        Args:
-            last_hidden_state (torch.FloatTensor): [bs, seq_len, hidden_dim]
-            hallu_last_hidden_state (torch.FloatTensor): [bs, seq_len, hidden_dim]
-            obj_words (List[List[str]]): [bs, num_obj_words]
-            new_obj_tracklet_indices (List[List[List[int]]]): [bs, num_obj_words, num_frames, occupied_patch_indices]
-            new_obj_phrase_indices (List[List[torch.LongTensor]]): [bs, num_obj_words, occupied_token_indices]
-            hallu_obj_words (List[List[str]]): [bs, num_hallu_obj_words]
-            hallu_obj_phrase_indices (List[List[torch.LongTensor]]): [bs, num_hallu_obj_words, occupied_token_indices]
-        """
-        
-        with torch.no_grad():
-            self.model.itc_temp.data.clamp_(0.01, 0.5)
-
-        bs = last_hidden_state.size(0)
-        device = last_hidden_state.device
-
-        ## aggr_obj_phrase_embeddings and aggr_obj_tracklet_embeddings
-        aggr_obj_phrase_embeddings = torch.tensor([]).to(last_hidden_state.device).to(last_hidden_state.dtype)  # [bs * num_detected_obj, hidden_dim]
-        aggr_obj_tracklet_embeddings = torch.tensor([]).to(last_hidden_state.device).to(last_hidden_state.dtype)  # [bs * num_detected_obj, hidden_dim]
-
-        filtered_obj_tracklet_indices = []  # List[List[int]]: [bs, num_detected_obj, occupied_patch_indices]
-        filtered_obj_phrase_indices = []  # List[List[torch.LongTensor]]: [bs, num_detected_obj, occupied_token_indices]
-        added_obj_words = []  # List[str]: [num_no_repeated_obj]
-        for batch_idx in range(bs):
-            sub_filtered_obj_tracklet_indices, sub_filtered_obj_phrase_indices = [], []
-            for obj_idx, all_tracklet_indices in enumerate(new_obj_tracklet_indices[batch_idx]):
-                flat_tracklet_indices = []
-                for frame_idx, tracklet_indices in enumerate(all_tracklet_indices):
-                    flat_tracklet_indices += tracklet_indices
-                obj_word = obj_words[batch_idx][obj_idx]
-                if (flat_tracklet_indices != []) and (obj_word not in added_obj_words):
-                    sub_filtered_obj_tracklet_indices.append(flat_tracklet_indices)
-                    sub_filtered_obj_phrase_indices.append(new_obj_phrase_indices[batch_idx][obj_idx])
-                    added_obj_words.append(obj_word)
-            filtered_obj_tracklet_indices.append(sub_filtered_obj_tracklet_indices)
-            filtered_obj_phrase_indices.append(sub_filtered_obj_phrase_indices)
-
-        for batch_idx in range(bs):
-            text_aggr_embedding = self.get_aggr_embedding(last_hidden_state[batch_idx], filtered_obj_phrase_indices[batch_idx])  # [num_detected_obj, hidden_dim]
-            vis_aggr_embedding = self.get_aggr_embedding(last_hidden_state[batch_idx], filtered_obj_tracklet_indices[batch_idx])  # [num_detected_obj, hidden_dim]
-            aggr_obj_phrase_embeddings = torch.cat((aggr_obj_phrase_embeddings, text_aggr_embedding), dim=0)
-            aggr_obj_tracklet_embeddings = torch.cat((aggr_obj_tracklet_embeddings, vis_aggr_embedding), dim=0)
-
-        obj_phrase_embeddings = self.model.contrastive_text_projector(aggr_obj_phrase_embeddings)
-        obj_tracklet_embeddings = self.model.contrastive_vision_projector(aggr_obj_tracklet_embeddings)
-
-        ## gather_obj_phrase_embeddings and gather_obj_tracklet_embeddings
-        gather_obj_phrase_embeddings = all_gather(obj_phrase_embeddings)
-        gather_obj_phrase_embeddings = torch.concat([data.to(device) for data in gather_obj_phrase_embeddings], dim=0)  # [bs*num_process*num_detected_obj, hidden_dim]
-        gather_obj_tracklet_embeddings = all_gather(obj_tracklet_embeddings)
-        gather_obj_tracklet_embeddings = torch.concat([data.to(device) for data in gather_obj_tracklet_embeddings], dim=0)  # [bs*num_process*num_detected_obj, hidden_dim]
-
-        ## gather_obj_phrase_embeddings (if hallu)
-        if hallu_last_hidden_state is not None:
-            # aggregate the hallucinated object phrase embeddings
-            hallu_obj_phrase_embeddings = torch.tensor([]).to(device).to(last_hidden_state.dtype)  # torch.FloatTensor: [bs * num_hallu_obj_words, hidden_dim]
-            for batch_idx in range(bs):
-                hallu_text_aggr_embedding = self.get_aggr_embedding(hallu_last_hidden_state[batch_idx], hallu_obj_phrase_indices[batch_idx])  # [num_hallu_obj_words, hidden_dim]
-                hallu_obj_phrase_embeddings = torch.cat((hallu_obj_phrase_embeddings, hallu_text_aggr_embedding), dim=0)
-            if len(hallu_obj_phrase_embeddings) > 0:
-                hallu_obj_phrase_embeddings = self.model.contrastive_text_projector(hallu_obj_phrase_embeddings)
-            gather_hallu_obj_phrase_embeddings = all_gather(hallu_obj_phrase_embeddings)  # [bs*num_process*num_hallu_obj_words, hidden_dim]
-            gather_hallu_obj_phrase_embeddings = torch.concat([data.to(device) for data in gather_hallu_obj_phrase_embeddings], dim=0)  # [bs*num_process*num_hallu_obj_words, hidden_dim]
-            gather_obj_phrase_embeddings = torch.cat((gather_obj_phrase_embeddings, gather_hallu_obj_phrase_embeddings), dim=0)  # [bs*num_process*(num_detected_obj + num_hallu_obj_words), hidden_dim]
-
-        sim_v2t = F.normalize(obj_tracklet_embeddings,dim=-1) @ F.normalize(gather_obj_phrase_embeddings,dim=-1).T / self.model.itc_temp  # [bs*num_process*num_obj_words, bs*num_process*(num_obj_words (+ num_hallu_obj_words))]
-        sim_t2v = F.normalize(obj_phrase_embeddings,dim=-1) @ F.normalize(gather_obj_tracklet_embeddings,dim=-1).T / self.model.itc_temp  # [bs*num_process*num_obj_words, bs*num_process*num_obj_words]
-        rank = dist.get_rank()
-        gather_num_obj_words = all_gather(obj_tracklet_embeddings.size(0))
-        acum_num_obj_words = [0]
-        for i in range(len(gather_num_obj_words) - 1):
-            acum_num_obj_words.append(acum_num_obj_words[-1] + gather_num_obj_words[i])
-        sim_labels = torch.arange(acum_num_obj_words[rank], acum_num_obj_words[rank] + obj_tracklet_embeddings.size(0), dtype=torch.long).to(device)
-        
-        loss_v2t_vtfc = F.cross_entropy(sim_v2t, sim_labels, label_smoothing=0.1)
-        loss_t2v_vtfc = F.cross_entropy(sim_t2v, sim_labels, label_smoothing=0.1)
-        loss_vtfc = (loss_v2t_vtfc + loss_t2v_vtfc) / 2
-
-        return loss_vtfc
-    
-    def compute_act_vtfc_loss(
-        self,
-        last_hidden_state: torch.FloatTensor, 
-        hallu_last_hidden_state: torch.FloatTensor,
-        act_words: List[List[str]],
-        new_act_tracklet_indices: List[List[List[int]]],
-        new_act_phrase_indices: List[List[List[int]]],
-        hallu_act_words: List[List[str]],
-        hallu_act_phrase_indices: List[List[List[int]]]
-    ):
-        """
-        Args:
-            last_hidden_state (torch.FloatTensor): [bs, seq_len, hidden_dim]
-            hallu_last_hidden_state (torch.FloatTensor): [bs, seq_len, hidden_dim]
-            act_words (List[List[str]]): [bs, num_act_words]
-            new_act_tracklet_indices (List[List[List[int]]]): [bs, num_act_words, num_frames, occupied_patch_indices]
-            new_act_phrase_indices (List[List[torch.LongTensor]]): [bs, num_act_words, occupied_token_indices]
-            hallu_act_words (List[List[str]]): [bs, num_hallu_act_words]
-            hallu_act_phrase_indices (List[List[torch.LongTensor]]): [bs, num_hallu_act_words, occupied_token_indices]
-        """
-        
-        with torch.no_grad():
-            self.model.itc_temp.data.clamp_(0.01, 0.5)
-            
-        bs = last_hidden_state.size(0)
-        device = last_hidden_state.device
-        
-        ## encoder_hidden_states 
-        encoder_hidden_states = []  # expected shape = [bs*num_detected_act_words, num_occupied_patches_indices, hidden_dim]
-        for batch_idx in range(len(new_act_tracklet_indices)):
-            for word_idx in range(len(new_act_tracklet_indices[batch_idx])):
-                single_word_tracklet_indices = []  # expected shape = [num_occupied_patch_indices]
-                for frame_idx in range(len(new_act_tracklet_indices[batch_idx][word_idx])):
-                    single_word_tracklet_indices += new_act_tracklet_indices[batch_idx][word_idx][frame_idx]
-                    # truncate
-                    if len(single_word_tracklet_indices) > self.model.act_squeezer.config.encoder_max_len:
-                        single_word_tracklet_indices = single_word_tracklet_indices[:self.model.act_squeezer.config.encoder_max_len]
-                        break
-                encoder_hidden_states.append(last_hidden_state[batch_idx][single_word_tracklet_indices, :])
-
-        # combine them, and create the attention mask
-        max_len = max(len(x) for x in encoder_hidden_states)
-        encoder_hidden_states_padded = []  # [bs*num_detected_act_words, max_len, hidden_dim]
-        encoder_attention_mask = []  # [bs*num_detected_act_words, max_len]
-        for batch_idx, cur_encoder_hidden_state in enumerate(encoder_hidden_states):
-            cur_len = len(cur_encoder_hidden_state)
-            cur_attn_mask = torch.cat(
-                (torch.ones(cur_len, dtype=torch.long).to(device), 
-                 torch.zeros(max_len - cur_len, dtype=torch.long).to(device)), 
-                dim=0
-            )
-            encoder_attention_mask.append(cur_attn_mask)
-            encoder_hidden_states_padded.append(
-                torch.cat((cur_encoder_hidden_state, 
-                           torch.zeros((max_len - cur_len, cur_encoder_hidden_state.shape[1]), 
-                                       dtype=last_hidden_state.dtype, 
-                                       device=device)
-                          ), dim=0)
-            )
-        encoder_hidden_states = torch.stack(encoder_hidden_states_padded, dim=0)  # [bs*num_act_words, all_patches, hidden_dim]
-        encoder_attention_mask = torch.stack(encoder_attention_mask, dim=0)  # [bs*num_act_words, all_patches]
-        
-        ## act_queries
-        act_queries = self.model.act_squeezer(x=encoder_hidden_states, attn_mask=encoder_attention_mask)  # [bs*num_act_words, num_latents, hidden_dim]
-        
-        ## gather_act_tracklet_embeddings and gather_act_phrase_embeddings (from act_queries)
-        act_phrase_embeddings = torch.tensor([]).to(device).to(last_hidden_state.dtype)  # [bs*num_act_words, hidden_dim]
-        for batch_idx in range(bs):
-            text_aggr_embedding = self.get_aggr_embedding(last_hidden_state[batch_idx], new_act_phrase_indices[batch_idx])  # [num_act_words, hidden_dim]
-            act_phrase_embeddings = torch.cat((act_phrase_embeddings, text_aggr_embedding), dim=0)
-
-        # choose the max similarity as act_tracklet from act_queries
-        norm_act_queries = nn.functional.normalize(act_queries, dim=-1)
-        norm_act_phrase_embeddings = nn.functional.normalize(act_phrase_embeddings, dim=-1).unsqueeze(dim=1)  # [bs*num_act_words, 1, hidden_dim]
-        cosine_sim = F.cosine_similarity(norm_act_phrase_embeddings, norm_act_queries, dim=-1)  # [bs*num_act_words, num_latents]
-        max_indices = torch.argmax(cosine_sim, dim=-1)  # [bs*num_act_words]
-        act_tracklet_embeddings = act_queries[torch.arange(act_queries.shape[0]), max_indices]  # [bs*num_act_words, hidden_dim]
-
-        # constrastive projector forward
-        act_phrase_embeddings = self.model.contrastive_text_projector(act_phrase_embeddings)
-        act_tracklet_embeddings = self.model.contrastive_vision_projector(act_tracklet_embeddings)
-        
-        ## gather the act_queries and act_phrase_embeddings
-        gather_act_tracklet_embeddings = all_gather(act_tracklet_embeddings)
-        gather_act_tracklet_embeddings = torch.concat([data.to(device) for data in gather_act_tracklet_embeddings], dim=0)  # [bs*num_process*num_act_words, hidden_dim]
-        gather_act_phrase_embeddings = all_gather(act_phrase_embeddings)
-        gather_act_phrase_embeddings = torch.concat([data.to(device) for data in gather_act_phrase_embeddings], dim=0)  # [bs*num_process*num_act_words, hidden_dim]
-        
-        ## gather_act_phrase_embeddings (if hallu)
-        if hallu_last_hidden_state is not None:
-            hallu_act_phrase_embeddings = torch.tensor([]).to(device).to(last_hidden_state.dtype)  # [bs*num_hallu_act_words, hidden_dim]
-            for batch_idx in range(bs):
-                hallu_text_aggr_embedding = self.get_aggr_embedding(hallu_last_hidden_state[batch_idx], hallu_act_phrase_indices[batch_idx])  # [num_hallu_act_words, hidden_dim]
-                hallu_act_phrase_embeddings = torch.cat((hallu_act_phrase_embeddings, hallu_text_aggr_embedding), dim=0)
-            if len(hallu_act_phrase_embeddings) > 0:
-                hallu_act_phrase_embeddings = self.model.contrastive_text_projector(hallu_act_phrase_embeddings)
-            gather_hallu_act_phrase_embeddings = all_gather(hallu_act_phrase_embeddings)  # [bs*num_process*num_hallu_act_words, hidden_dim]
-            gather_hallu_act_phrase_embeddings = torch.concat([data.to(device) for data in gather_hallu_act_phrase_embeddings], dim=0)  # [bs*num_process*num_hallu_act_words, hidden_dim]
-            gather_act_phrase_embeddings = torch.cat((gather_act_phrase_embeddings, gather_hallu_act_phrase_embeddings), dim=0)  # [bs*num_process*(num_act_words + num_hallu_act_words), hidden_dim]
-
-        ## calculate the loss (gather_act_tracklet_embeddings and gather_act_phrase_embeddings)  
-        sim_v2t = F.normalize(act_tracklet_embeddings,dim=-1) @ F.normalize(gather_act_phrase_embeddings.detach(),dim=-1).T / self.model.itc_temp  # [bs*num_act_words, bs*num_process*(num_act_words + num_hallu_act_words)]
-        sim_t2v = F.normalize(act_phrase_embeddings,dim=-1) @ F.normalize(gather_act_tracklet_embeddings.detach(),dim=-1).T / self.model.itc_temp  # [bs*num_act_words, bs*num_process*num_act_words]
-        rank = dist.get_rank()
-        gather_num_act_words = all_gather(act_tracklet_embeddings.size(0))
-        acum_num_act_words = [0]
-        for i in range(len(gather_num_act_words) - 1):
-            acum_num_act_words.append(acum_num_act_words[-1] + gather_num_act_words[i])
-        sim_labels = torch.arange(acum_num_act_words[rank], acum_num_act_words[rank] + act_tracklet_embeddings.size(0), dtype=torch.long).to(device)
-
-        loss_v2t_vtfc = F.cross_entropy(sim_v2t, sim_labels, label_smoothing=0.1)
-        loss_t2v_vtfc = F.cross_entropy(sim_t2v, sim_labels, label_smoothing=0.1)
-        loss_vtfc = (loss_v2t_vtfc + loss_t2v_vtfc) / 2
-
-        return loss_vtfc
-    
     def compute_cl_loss(
         self,
         last_hidden_state: torch.FloatTensor,
@@ -550,19 +257,7 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
         # video-caption contrastive learning
         new_frame_bounds: torch.LongTensor,
         new_caption_bounds: torch.LongTensor,
-        hallu_caption_bounds: torch.LongTensor,
-        # tracklet-phrase object-level contrastive learning
-        obj_words: List[List[str]],
-        new_obj_tracklet_indices: List[List[List[int]]],
-        new_obj_phrase_indices: List[List[List[int]]],
-        hallu_obj_words: List[List[str]],
-        hallu_obj_phrase_indices: List[List[List[int]]],
-        # tracklet-phrase action-level contrastive learning
-        act_words: List[List[str]],
-        new_act_tracklet_indices: List[List[List[int]]],
-        new_act_phrase_indices: List[List[List[int]]],
-        hallu_act_words: List[List[str]],
-        hallu_act_phrase_indices: List[List[List[int]]],
+        hallu_caption_bounds: torch.LongTensor
     ):
         """
         Args:
@@ -572,52 +267,17 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
             new_frame_bounds (torch.LongTensor): [bs, num_frames = 8, 2]
             new_caption_bounds (torch.LongTensor): [bs, num_caption = 1, 2]
             hallu_caption_bounds (torch.LongTensor): [bs, num_hallu_captions = 1, 2]
-            
-            obj_words (List[List[str]]): [bs, num_obj_words]
-            new_obj_tracklet_indices (List[List[List[int]]]): [bs, num_obj_words, num_frames, occupied_patch_indices]
-            new_obj_phrase_indices (List[List[List[int]]]): [bs, num_obj_words, occupied_token_indices]
-            hallu_obj_words (List[List[str]]): [bs, num_hallu_obj_words]
-            hallu_obj_phrase_indices (List[List[List[int]]]): [bs, num_hallu_obj_words, occupied_token_indices]
-            
-            act_words (List[List[str]]): [bs, num_act_words]
-            new_act_tracklet_indices (List[List[List[int]]]): [bs, num_act_words, num_frames, occupied_patch_indices]
-            new_act_phrase_indices (List[List[List[int]]]): [bs, num_act_words, occupied_token_indices]
-            hallu_act_words (List[List[str]]): [bs, num_hallu_act_words]
-            hallu_act_phrase_indices (List[List[List[int]]]): [bs, num_hallu_act_words, occupied_token_indices]
-
         Returns:
             cl_loss (dict): the contrastive learning loss
         """
         cl_loss = {}
-        assert self.config.vccl_wt + self.config.tpocl_wt + self.config.tpacl_wt > 0, "The sum of contrastive learning weights must be greater than 0."
-        if self.config.vccl_wt > 0:
-            cl_loss['loss_vtcc'] = self.compute_vtcc_loss(
-                last_hidden_state=last_hidden_state, 
-                hallu_last_hidden_state=hallu_last_hidden_state, 
-                new_frame_bounds=new_frame_bounds, 
-                new_caption_bounds=new_caption_bounds, 
-                hallu_caption_bounds=hallu_caption_bounds
-            )
-        if self.config.tpocl_wt > 0:
-            cl_loss['loss_obj_vtfc'] = self.compute_obj_vtfc_loss(
-                last_hidden_state=last_hidden_state, 
-                hallu_last_hidden_state=hallu_last_hidden_state,
-                obj_words=obj_words,
-                new_obj_tracklet_indices=new_obj_tracklet_indices,
-                new_obj_phrase_indices=new_obj_phrase_indices,
-                hallu_obj_words=hallu_obj_words,
-                hallu_obj_phrase_indices=hallu_obj_phrase_indices
-            )
-        if self.config.tpacl_wt > 0:
-            cl_loss['loss_act_vtfc'] = self.compute_act_vtfc_loss(
-                last_hidden_state=last_hidden_state, 
-                hallu_last_hidden_state=hallu_last_hidden_state,
-                act_words=act_words,
-                new_act_tracklet_indices=new_act_tracklet_indices,
-                new_act_phrase_indices=new_act_phrase_indices,
-                hallu_act_words=hallu_act_words,
-                hallu_act_phrase_indices=hallu_act_phrase_indices
-            )
+        cl_loss['loss_vtcc'] = self.compute_vtcc_loss(
+            last_hidden_state=last_hidden_state, 
+            hallu_last_hidden_state=hallu_last_hidden_state, 
+            new_frame_bounds=new_frame_bounds, 
+            new_caption_bounds=new_caption_bounds, 
+            hallu_caption_bounds=hallu_caption_bounds
+        )
         return cl_loss
 
     def forward(
@@ -638,22 +298,13 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
         # evolving hallucinated negative
         hallu_input_ids: Optional[torch.LongTensor] = None,
         hallu_attention_mask: Optional[torch.Tensor] = None,
-        block_ids: Optional[torch.LongTensor] = None,
-        # object-level contrastive learning
-        obj_patch_indices: Optional[List[List[List[int]]]] = None,
-        obj_words: Optional[List[List[str]]] = None,
-        obj_phrase_indices: Optional[List[List[int]]] = None,
-        # action-level contrastive learning
-        act_patch_indices: Optional[List[List[List[int]]]] = None,
-        act_words: Optional[List[List[str]]] = None,
-        act_phrase_indices: Optional[List[List[int]]] = None,
         # others
         hallu_forward: Optional[bool] = False,
         dpo_forward: Optional[bool] = False,
         cache_position=None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
 
-        if (inputs_embeds is None) and (obj_patch_indices is not None) and (obj_phrase_indices is not None) and (act_phrase_indices is not None):
+        if inputs_embeds is None:
             (
                 input_ids, 
                 position_ids, 
@@ -662,11 +313,7 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
                 inputs_embeds, 
                 labels, 
                 frame_bounds, 
-                caption_bounds, 
-                obj_tracklet_indices, 
-                obj_phrase_indices, 
-                act_tracklet_indices,
-                act_phrase_indices,
+                caption_bounds
             ) = self.prepare_contrastive_inputs_labels_for_multimodal(
                 input_ids=input_ids,
                 position_ids=position_ids,
@@ -676,11 +323,8 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
                 images=images,
                 modalities=modalities,
                 image_sizes=image_sizes,
-                obj_patch_indices=obj_patch_indices,
-                obj_phrase_indices=obj_phrase_indices,
-                act_patch_indices=act_patch_indices,
-                act_phrase_indices=act_phrase_indices
             )
+
         # generate hallucinated hard negative on-the-fly
         # === caption loss ===
         output_hidden_states=True
@@ -708,10 +352,7 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
             last_hidden_state = outputs.hidden_states[-1]
             
             if self.config.use_hard_neg:
-                self.model.eval()
-
-                hallu_input_ids, hallu_pseudo_labels, hallu_obj_phrase_indices, hallu_act_phrase_indices, hallu_obj_words, hallu_act_words = \
-                    self.generate_hallu_captions(hallu_input_ids=hallu_input_ids, hallu_attention_mask=hallu_attention_mask, block_ids=block_ids, images=images, image_sizes=image_sizes, modalities=modalities)
+                hallu_pseudo_labels = hallu_input_ids.masked_fill(hallu_input_ids == self.tokenizer.pad_token_id, IGNORE_INDEX)
                 hallu_attention_mask = hallu_input_ids.ne(self.tokenizer.pad_token_id)
                 (
                     _,
@@ -721,24 +362,16 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
                     hallu_inputs_embeds,
                     hallu_pseudo_labels,  # dummy, will not be used
                     _,
-                    hallu_caption_bounds,
-                    _,
-                    hallu_obj_phrase_indices,
-                    _,
-                    hallu_act_phrase_indices,
+                    hallu_caption_bounds
                 ) = self.prepare_contrastive_inputs_labels_for_multimodal(
                     input_ids=hallu_input_ids, 
                     position_ids=None, 
                     attention_mask=hallu_attention_mask, 
                     past_key_values=None, 
                     labels=hallu_pseudo_labels, 
-                    images=images, 
+                    images=images,
                     modalities=modalities, 
-                    image_sizes=image_sizes, 
-                    obj_patch_indices=obj_patch_indices, 
-                    obj_phrase_indices=hallu_obj_phrase_indices,
-                    act_patch_indices=act_patch_indices,
-                    act_phrase_indices=hallu_act_phrase_indices
+                    image_sizes=image_sizes
                 )
                 hard_neg_inputs_embeds = hallu_inputs_embeds
                 with torch.inference_mode():
@@ -747,15 +380,9 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
                         inputs_embeds=hard_neg_inputs_embeds,
                         output_hidden_states=True,
                     ).hidden_states[-1].detach()
-
-                self.model.train()
             else:
                 hallu_last_hidden_state = None
                 hallu_caption_bounds = None
-                hallu_obj_phrase_indices = None
-                hallu_act_phrase_indices = None
-                hallu_obj_words = None
-                hallu_act_words = None
                 
             self.model.contrastive_vision_projector.train()
             self.model.contrastive_text_projector.train()
@@ -765,17 +392,7 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
                 hallu_last_hidden_state=hallu_last_hidden_state, 
                 new_frame_bounds=frame_bounds, 
                 new_caption_bounds=caption_bounds, 
-                hallu_caption_bounds=hallu_caption_bounds,
-                obj_words=obj_words,
-                new_obj_tracklet_indices=obj_tracklet_indices, 
-                new_obj_phrase_indices=obj_phrase_indices, 
-                hallu_obj_words=hallu_obj_words,
-                hallu_obj_phrase_indices=hallu_obj_phrase_indices,
-                act_words=act_words,
-                new_act_tracklet_indices=act_tracklet_indices,
-                new_act_phrase_indices=act_phrase_indices,
-                hallu_act_words=hallu_act_words,
-                hallu_act_phrase_indices=hallu_act_phrase_indices,
+                hallu_caption_bounds=hallu_caption_bounds
             )
 
             if len(cl_loss) != 0:
@@ -785,15 +402,7 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
                         cl_loss_log[loss_name] = loss_value.detach().clone()
 
                 for loss_name, loss_value in cl_loss.items():
-                    if loss_name == 'loss_obj_vtfc' and loss_value is not None:
-                        loss = loss + loss_value * self.config.tpocl_wt
-                    elif loss_name == 'loss_act_vtfc' and loss_value is not None:
-                        loss = loss + loss_value * self.config.tpacl_wt
-                    elif loss_name == 'loss_vtcc':
-                        if 'loss_obj_vtfc' in cl_loss and cl_loss['loss_obj_vtfc'] is None:  # to avoid the case that no object is detected
-                            loss = loss + loss_value * self.config.tpocl_wt
-                        if 'loss_act_vtfc' in cl_loss and cl_loss['loss_act_vtfc'] is None:  # to avoid the case that no action is detected
-                            loss = loss + loss_value * self.config.tpacl_wt
+                    if loss_name == 'loss_vtcc':
                         loss = loss + loss_value * self.config.vccl_wt
 
                 # create ContrastiveCausalLMOutput object
@@ -807,7 +416,7 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
 
         return outputs
     
-    def prepare_contrastive_inputs_labels_for_multimodal(self, input_ids, position_ids, attention_mask, past_key_values, labels, images, modalities, image_sizes, obj_patch_indices, obj_phrase_indices, act_patch_indices, act_phrase_indices):
+    def prepare_contrastive_inputs_labels_for_multimodal(self, input_ids, position_ids, attention_mask, past_key_values, labels, images, modalities, image_sizes):
         vision_tower = self.get_vision_tower()
         # rank_print(modalities)
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
@@ -1003,8 +612,6 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
 
         # init the return variables
         new_input_embeds, new_labels, new_frame_bounds, new_caption_bounds = [], [], [], []
-        new_obj_tracklet_indices, new_obj_phrase_indices = copy.deepcopy(obj_patch_indices), copy.deepcopy(obj_phrase_indices), 
-        new_act_tracklet_indices, new_act_phrase_indices = copy.deepcopy(act_patch_indices), copy.deepcopy(act_phrase_indices)
         cur_image_idx = 0
         # import pdb; pdb.set_trace()
         # rank_print("Inserting Images embedding")
@@ -1068,15 +675,6 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
                     cap_start_idx = prefix_cap_start_idx + len(caption_prefix_ids)
                     cap_end_idx = cur_new_input_embeds.shape[0]
                     cur_caption_bound = torch.tensor([cap_start_idx, cap_end_idx]).unsqueeze(0).to(device)
-                    # new_obj_phrase_indices
-                    num_added_image_tokens = num_images * (len(image_features[-1]) - 1)  # -1 since -200 is the original image token
-                    for obj_idx in range(len(obj_phrase_indices[batch_idx])):
-                        for token_idx in range(len(obj_phrase_indices[batch_idx][obj_idx])):
-                            new_obj_phrase_indices[batch_idx][obj_idx][token_idx] = obj_phrase_indices[batch_idx][obj_idx][token_idx] + num_added_image_tokens
-                    # new_act_phrase_indices
-                    for act_idx in range(len(act_phrase_indices[batch_idx])):
-                        for token_idx in range(len(act_phrase_indices[batch_idx][act_idx])):
-                            new_act_phrase_indices[batch_idx][act_idx][token_idx] = act_phrase_indices[batch_idx][act_idx][token_idx] + num_added_image_tokens
 
             new_input_embeds.append(cur_new_input_embeds)
             new_labels.append(cur_new_labels)
@@ -1085,7 +683,7 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
         
         frame_num = images[0].shape[0]
         new_frame_bounds = torch.stack(new_frame_bounds).to(torch.int32)
-        new_frame_bounds, new_obj_tracklet_indices, new_act_tracklet_indices = self._split_frame_bounds(new_frame_bounds, frame_num, obj_patch_indices, new_obj_tracklet_indices, act_patch_indices, new_act_tracklet_indices)
+        new_frame_bounds = self._split_frame_bounds(new_frame_bounds, frame_num)
         new_caption_bounds = torch.stack(new_caption_bounds).to(torch.int32)
         
         # Truncate sequences to max length as image embeddings can make the sequence longer
@@ -1103,16 +701,7 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
             max_len_idx = tokenizer_model_max_length - 1
             new_frame_bounds = torch.where(new_frame_bounds < max_len_idx, new_frame_bounds, max_len_idx)
             new_caption_bounds = torch.where(new_caption_bounds < max_len_idx, new_caption_bounds, max_len_idx)
-            # we only handle the phrase indices (not tracklet indices) here, since tracklet indices are impossible to be longer than max_len by default
-            for batch_idx in range(len(input_ids)):
-                for obj_idx in range(len(new_obj_phrase_indices[batch_idx])):
-                    for token_idx in range(len(new_obj_phrase_indices[batch_idx][obj_idx])):
-                        if new_obj_phrase_indices[batch_idx][obj_idx][token_idx] > max_len_idx:
-                            new_obj_phrase_indices[batch_idx][obj_idx][token_idx] = max_len_idx
-                for act_idx in range(len(new_act_phrase_indices[batch_idx])):
-                    for token_idx in range(len(new_act_phrase_indices[batch_idx][act_idx])):
-                        if new_act_phrase_indices[batch_idx][act_idx][token_idx] > max_len_idx:
-                            new_act_phrase_indices[batch_idx][act_idx][token_idx] = max_len_idx
+
             
         # TODO: Hard code for control loss spike
         # if tokenizer_model_max_length is not None:
@@ -1170,21 +759,15 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
         # rank0_print("Finish preparing")
         
         return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels, \
-            new_frame_bounds, new_caption_bounds, new_obj_tracklet_indices, new_obj_phrase_indices, new_act_tracklet_indices, new_act_phrase_indices
+            new_frame_bounds, new_caption_bounds
 
-    def _split_frame_bounds(self, frame_bounds, frame_num, obj_patch_indices, new_obj_tracklet_indices, act_patch_indices, new_act_tracklet_indices):
+    def _split_frame_bounds(self, frame_bounds, frame_num):
         """ Since the image tokens are concated together in LLaVA-Video, we need to split the frame bounds into frame_num chunks accordingly.
         Args:
             frame_bounds (torch.Tensor): The frame bounds to be split. Shape = (bs, 1, 2).
             frame_num (int): The number of frames in the video.
-            obj_patch_indices (List[List[List[int]]]): The object patch indices to be split. Shape = [bs, num_obj_words, num_frames, occupied_patch_indices].
-            new_obj_tracklet_indices (List[List[List[int]]]): It is created from copy.deepcopy(obj_patch_indices). Shape = [bs, num_obj_words, num_frames, occupied_patch_indices].
-            act_patch_indices (List[List[List[int]]]): The action patch indices to be split. Shape = [bs, num_act_words, num_frames, occupied_patch_indices].
-            new_act_tracklet_indices (List[List[List[int]]]): It is created from copy.deepcopy(act_patch_indices). Shape = [bs, num_act_words, num_frames, occupied_patch_indices].
         Returns:
             chunked_frame_bounds (torch.Tensor): Frame bounds. Shape = (bs, frame_num, 2).
-            new_obj_tracklet_indices (List[List[List[int]]]): The updated new_obj_tracklet_indices. Shape = [bs, num_obj_words, num_frames, occupied_patch_indices].
-            new_act_tracklet_indices (List[List[List[int]]]): The updated new_act_tracklet_indices. Shape = [bs, num_act_words, num_frames, occupied_patch_indices].
         """
         # chunk the frame bounds
         chunked_frame_bounds = []
@@ -1194,22 +777,8 @@ class FaithLlavaQwenForCausalLM(Qwen2ForCausalLM, LlavaMetaForCausalLM, HalluGen
             chunk_size = (end_vdo_idx - start_vdo_idx) // frame_num
             chunked_frame_bounds.append(torch.stack([torch.tensor([start_vdo_idx + i * chunk_size, start_vdo_idx + (i + 1) * chunk_size]) for i in range(frame_num)], dim=0))
         chunked_frame_bounds = torch.stack(chunked_frame_bounds)
-        
-        # update the new_obj_tracklet_indices
-        for batch_idx in range(len(obj_patch_indices)):
-            for obj_idx in range(len(obj_patch_indices[batch_idx])):
-                for frame_idx in range(len(obj_patch_indices[batch_idx][obj_idx])):
-                    frame_start_idx = chunked_frame_bounds[batch_idx][frame_idx][0]
-                    new_obj_tracklet_indices[batch_idx][obj_idx][frame_idx] = [idx + frame_start_idx for idx in obj_patch_indices[batch_idx][obj_idx][frame_idx]]
-        
-        # update the new_act_tracklet_indices
-        for batch_idx in range(len(act_patch_indices)):
-            for act_idx in range(len(act_patch_indices[batch_idx])):
-                for frame_idx in range(len(act_patch_indices[batch_idx][act_idx])):
-                    frame_start_idx = chunked_frame_bounds[batch_idx][frame_idx][0]
-                    new_act_tracklet_indices[batch_idx][act_idx][frame_idx] = [idx + frame_start_idx for idx in act_patch_indices[batch_idx][act_idx][frame_idx]]
                     
-        return chunked_frame_bounds, new_obj_tracklet_indices, new_act_tracklet_indices
+        return chunked_frame_bounds
 
     # directly copy from LlavaQwenForCausalLM
     @torch.no_grad()

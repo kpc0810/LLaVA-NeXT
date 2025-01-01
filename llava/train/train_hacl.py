@@ -32,10 +32,9 @@ from llava.train.llava_trainer import LLaVATrainer
 
 from llava import conversation as conversation_lib
 from llava.model import *
-from llava.model.language_model.faith_llava_qwen import FaithLlavaQwenForCausalLM
+from llava.model.language_model.hacl_llava_qwen import FaithLlavaQwenForCausalLM
 from llava.utils import rank_print, rank0_print, rank0_breakpoint
-from llava.datamodule.lazy import LazySupervisedDataset, DataCollatorForSupervisedDataset
-from llava.datamodule.mira import MiraLazySupervisedDataset, MiraLazyContrastiveDataset, MiraDataCollatorForContrastiveDataset
+from llava.datamodule.mira_baseline import MiraHaclContrastiveDataset, MiraHaclDataCollatorForContrastiveDataset
 from llava.args import ModelArguments, DataArguments, TrainingArguments
 torch.multiprocessing.set_sharing_strategy("file_system")
 
@@ -185,14 +184,12 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, dat
     """Make dataset and collator for supervised fine-tuning."""
     if "mira" in data_args.data_path:
         if training_args.dehallu_finetune:
-            train_dataset = MiraLazyContrastiveDataset(tokenizer=tokenizer, data_path=data_args.data_path, data_args=data_args, model_args=model_args)
-            data_collator = MiraDataCollatorForContrastiveDataset(tokenizer=tokenizer)
+            train_dataset = MiraHaclContrastiveDataset(tokenizer=tokenizer, data_path=data_args.data_path, data_args=data_args, model_args=model_args)
+            data_collator = MiraHaclDataCollatorForContrastiveDataset(tokenizer=tokenizer)
         else:
-            train_dataset = MiraLazySupervisedDataset(tokenizer=tokenizer, data_path=data_args.data_path, data_args=data_args)
-            data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
+            raise ValueError("Unexpected behavior.")
     else:
-        train_dataset = LazySupervisedDataset(tokenizer=tokenizer, data_path=data_args.data_path, data_args=data_args)
-        data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
+        raise ValueError("Unexpected behavior.")
     return dict(train_dataset=train_dataset, eval_dataset=None, data_collator=data_collator)
 
 
@@ -622,14 +619,14 @@ def train(attn_implementation=None):
             model.config.tune_contrastive_projector = True
             model.config.contrastive_projector_lr = training_args.contrastive_projector_lr
             model.config.contrastive_projector_weight_decay = training_args.contrastive_projector_weight_decay
-            model.config.vccl_wt = training_args.vccl_wt
-            model.config.tpocl_wt = training_args.tpocl_wt
-            model.config.tpacl_wt = training_args.tpacl_wt
+            model.config.vccl_wt = 1.0
             # extra config for hallu negative sampling on the fly
-            model.config.use_hard_neg = training_args.use_hard_neg
+            model.config.use_hard_neg = True
             # config for act squeezer
-            model.config.act_squeezer_lr = training_args.act_squeezer_lr
-            model.config.act_squeezer_weight_decay = training_args.act_squeezer_weight_decay
+            model.config.act_squeezer_lr = 0.0
+            model.config.act_squeezer_weight_decay = 0.0
+            model.config.tpocl_wt = 0.0
+            model.config.tpacl_wt = 0.0
         else:
             model.config.tune_contrastive_projector = False
             model.config.contrastive_projector_lr = 0.0
@@ -640,7 +637,7 @@ def train(attn_implementation=None):
             model.config.use_hard_neg = False
             model.config.act_squeezer_lr = 0.0
             model.config.act_squeezer_weight_decay = 0.0
-
+        
     if training_args.bits in [4, 8]:
         from peft.tuners.lora import LoraLayer
 
