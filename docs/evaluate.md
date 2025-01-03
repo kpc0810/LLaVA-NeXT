@@ -54,7 +54,7 @@ enter your huggingface token
 
 ### Download
 required license, already available in ORD
-### Transribe subtitles into .txt format
+### [UPDATED] Transribe subtitles into .txt format
 ```
 bash scripts/pred/generate_videomme_subtitle.sh <video_path> <srt_path> <output_path>
 ```
@@ -71,13 +71,36 @@ bash scripts/pred/videomme.sh
 
 * prompt template:
 ```
-The video's subtitles are listed below:
-{subtitle}
-Select the best answer to the following multiple-choice question based on the video and the subtitles. Respond with the letter (A, B, C, or D) of the correct option and explain your choice.
+Select the best answer to the following multiple-choice question based on the video{ and the subtitles}. Respond with only the letter (A, B, C, or D) of the correct option
 {question}
 A. {choice_A}
 B. {choice_B}
 C. {choice_C}
 D. {choice_D}
 The best answer is:
+```
+`{ and the subtitles}` will be added to the prompt if you use --use_subtitle.
+
+## VidHal
+
+### Dataset
+directly assess annotation and raw videos in tp1's folder:
+`/mnt/home/kaipoc/research_vh/LLaVA-NeXT/playground/VidHal/vidhal`
+
+### Generate prediction
+```
+bash scripts/pred/vidhal/prediction.sh
+```
+
+### Evaluate score (accuracy)
+```
+bash scripts/pred/vidhal/evaluate.sh <pred_file> <gt_file> (<score_file>)
+```
+* `<score_file>` is optional, if not provided, it will be saved in the same directory as `<pred_file>`.
+* the result with be saved in json file (five different types and overall accuracy).
+
+## FactVC
+### Download (Evaluation model checkpoint)
+```
+gdown --id 1S9T4-XLHMhRt3NW4NRQ3WflmEaEZ_H5I
 ```
