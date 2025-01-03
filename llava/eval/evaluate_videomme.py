@@ -1,3 +1,4 @@
+import os
 import json
 import numpy as np
 import prettytable
@@ -53,7 +54,13 @@ def main(args):
     print(table)
     
     # Save the table to a file
-    with open(args.score_file, 'w') as f:
+    try:
+        save_dir = os.path.dirname(args.score_file)
+        os.makedirs(save_dir, exist_ok=True)
+        score_file = args.score_file
+    except :
+        score_file = args.pred_file.replace(".jsonl", "_score.json")
+    with open(score_file, 'w') as f:
         json.dump(out, f, indent=4)
     
 

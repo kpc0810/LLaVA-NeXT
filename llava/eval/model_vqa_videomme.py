@@ -325,35 +325,34 @@ def run_inference(args):
 
         time_instruciton = f"The video lasts for {video_time:.2f} seconds, and {num_frames_to_sample} frames are uniformly sampled from it. These frames are located at {frame_time}.Please answer the following questions related to this video."
         
-        # prompt = ""
-        # if args.use_subtitle:
-        #     prompt += "This video's subtitles are listed below:\n"
-        #     # prompt += "\n\n**Subtitles:**\n"
-        #     with open(os.path.join(args.subtitle_path, f"{youtube_id}.txt"), "r") as f:
-        #         subtitle_text = f.read()
-        #     prompt += f"{subtitle_text}\n\n"
-            
-        # # prompt += "Select the best answer to the following multiple-choice question based on the video. Respond with only the letter (A, B, C, or D) of the correct option."
-        # question = f"{sample['question']}\n"
-        # question += "\n".join(choice for choice in sample["choices"])
-        # question += "\nPlease provide your answer by stating the letter followed by the full option."
-        # # question += "\nPlease respond with only the letter (A, B, C, or D) of the correct option. Answer:"
+        add_subtitle = ""
+        prompt = "Select the best answer to the following multiple-choice question based on the video{}. Respond with only the letter (A, B, C, or D) of the correct option.\n"
+        prompt += sample["question"] + "\n"
+        prompt += "\n".join(sample["choices"]) + "\n"
+        prompt += "The best answer is:"
         
         # best answer prompt
-        subtitles_prompt, subtitle = "", ""
-        if args.use_subtitle:
-            subtitles_prompt = "This video's subtitles are listed below:\n"
-            with open(os.path.join(args.subtitle_path, f"{youtube_id}.txt"), "r") as f:
-                subtitle = f.read()
-            # subtitles_prompt = "[The Start of Reference Text]\n{}\n[The End of Reference Text]"
             
-        # option_prompt = "Select the best answer to the following multiple-choice question based on the video and the subtitles. Respond with only the letter (A, B, C, or D) of the correct option."
-        option_prompt = "Select the best answer to the following multiple-choice question based on the video and the subtitles. Respond with the letter (A, B, C, or D) of the correct option and explain your choice."
-        question = sample["question"]
-        option = "\n".join([f"{c}" for _, c in enumerate(sample["choices"])])
-        question = question + "\n" + option
-        full_prompt = subtitles_prompt + subtitle + "\n" + option_prompt + "\n" + question + "\n" + "The best answer is:"
-        # full_prompt = subtitles_prompt.format(subtitle) + "\n" + option_prompt + "\n" + question + "\n" + "The best answer is:"
+        # # option_prompt = "Select the best answer to the following multiple-choice question based on the video and the subtitles. Respond with only the letter (A, B, C, or D) of the correct option."
+        # option_prompt = "Select the best answer to the following multiple-choice question based on the video and the subtitles. Respond with the letter (A, B, C, or D) of the correct option and explain your choice."
+        # question = sample["question"]
+        # option = "\n".join([f"{c}" for _, c in enumerate(sample["choices"])])
+        # question = question + "\n" + option
+        # full_prompt = option_prompt + "\n" + question + "\n" + "The best answer is:"
+        # # full_prompt = subtitles_prompt.format(subtitle) + "\n" + option_prompt + "\n" + question + "\n" + "The best answer is:"
+        
+        if args.use_subtitle:
+            subtitles_prompt = "This video's subtitles are listed below:"
+            subtitle_path = os.path.join(args.subtitle_path, f"{youtube_id}.txt")
+            if os.path.exists(subtitle_path):
+                with open(subtitle_path, "r") as f:
+                    subtitle = f.read()
+                if subtitle != "":
+                    # full_prompt = subtitles_prompt + subtitle + "\n" + option_prompt + "\n" + question + "\n" + "The best answer is:"
+                    prompt = subtitles_prompt + "\n" + subtitle + "\n" + prompt
+                    add_subtitle = " and the subtitles"
+        
+        full_prompt = prompt.format(add_subtitle)
         
         sample["prompt"] = f'{DEFAULT_IMAGE_TOKEN}\n{time_instruciton}\n{full_prompt}'
 
