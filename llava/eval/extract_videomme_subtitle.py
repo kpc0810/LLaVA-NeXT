@@ -16,6 +16,7 @@ def parse_args():
 
 def main(args):
     
+    os.makedirs(args.output_path, exist_ok=True)
     for video in tqdm(os.listdir(args.video_path)):
         
         video_path = os.path.join(args.video_path, video)

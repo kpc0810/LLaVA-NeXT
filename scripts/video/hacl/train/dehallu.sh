@@ -125,7 +125,7 @@ torchrun --nproc_per_node=8 --nnodes="${SLURM_JOB_NUM_NODES}" --node_rank="${CUR
     --gradient_accumulation_steps 1 \
     --evaluation_strategy "no" \
     --save_strategy "steps" \
-    --save_steps 320 \
+    --save_steps 150 \
     --save_total_limit 30 \
     --learning_rate "${plm_lr}" \
     --weight_decay 0. \

@@ -46,7 +46,7 @@ exp_name=$(echo $OUTPUT_NAME | grep -oP '(?<=\[)[^\]]+(?=\])' | head -n 1)
 # fixed params
 data_file="/lustre/fsw/portfolios/nvr/projects/nvr_elm_llm/dataset/Video-MME/qa_old_format.json"
 video_folder="/lustre/fsw/portfolios/nvr/projects/nvr_elm_llm/dataset/Video-MME/videos"
-subtitle_path="playground/videomme/subtitle_txt"
+subtitle_path="playground/videomme/new_subtitle_txt"
 
 if [ "${use_subtitle}" = "true" ] || [ "${use_subtitle}" = "True" ]; then
     output_dir="outputs/videomme/with_subtitles/pred_results/${exp_name}"
