@@ -1,13 +1,14 @@
 #!/bin/bash
-#SBATCH --nodes=1
-#SBATCH --gpus-per-node=1
+#SBATCH --nodes=4
+#SBATCH --gpus-per-node=8
 #SBATCH --cpus-per-task=16
 #SBATCH --time=4:00:00
 #SBATCH --account=nvr_taiwan_rvos
 #SBATCH --partition=polar4,polar3,polar2,polar,batch_block1,grizzly,batch_block2,batch_block3
+#SBATCH --dependency=singleton
 #SBATCH --export=ALL
 
-source /lustre/fsw/portfolios/nvr/users/${USER}/miniconda3/bin/activate vila-eval
+source /lustre/fsw/portfolios/nvr/users/${USER}/miniconda3/bin/activate llava-eval
 which conda
 conda activate llava-eval
 
@@ -19,7 +20,7 @@ pred_file=$3
 score_file=$4
 test_dataset_path="/home/kaipoc/personal/research_vh/VILA/playground/data/eval/miradata/final_miradata_9k_test_dataset.csv"
 
-python3 llava/eval/evaluate_cap_hallunle_miradata.py \
+python3 llava/eval/evaluate_cap_hallu_miradata.py \
     --pred_data_dir "$pred_data_dir" \
     --score_data_dir "$score_data_dir" \
     --test_dataset_path "$test_dataset_path" \
