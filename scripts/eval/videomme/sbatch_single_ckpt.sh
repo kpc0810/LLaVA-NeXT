@@ -17,7 +17,7 @@ pred_file=$1
 score_file=$2
 gt_file="/lustre/fsw/portfolios/nvr/projects/nvr_elm_llm/dataset/Video-MME/qa_old_format.json"
 
-python3 llava/eval/evaluate_videomme.py \
+srun python3 llava/eval/evaluate_videomme.py \
     --gt_file "${gt_file}" \
     --pred_file "${pred_file}" \
     --score_file "${score_file}"

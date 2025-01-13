@@ -23,7 +23,7 @@ use_hard_neg=$(grep '^use_hard_neg' "$CONFIG_FILE" | awk -F ' = ' '{print $2}')
 chmod +x /home/kaipoc/personal/research_vh/LLaVA-NeXT/scripts/video/hacl/train/sbatch_dehallu.sh
 for i in $(seq 1 $total_runs); do
     sbatch \
-    --job-name=${EXP_NAME} \
+    --job-name=exp_b1 \
     --nodes=${n_nodes} \
     --output=/home/kaipoc/personal/research_vh/LLaVA-NeXT/slurm_log/train/${EXP_NAME}/run_${i}.txt \
     --error=/home/kaipoc/personal/research_vh/LLaVA-NeXT/slurm_error/train/${EXP_NAME}/run_${i}.txt \

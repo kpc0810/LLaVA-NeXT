@@ -19,7 +19,7 @@ for ((i = 1; i <= num_iterations; i++)); do
         echo "Running inference for $pred_file and save score to $score_file!"
 
         sbatch \
-        --job-name=eval_[${score_file%.json}]_miradata \
+        --job-name=em \
         --output=/home/kaipoc/personal/research_vh/LLaVA-NeXT/slurm_log/eval/miradata/${exp_name}/${pred_file}.txt \
         --error=/home/kaipoc/personal/research_vh/LLaVA-NeXT/slurm_error/eval/miradata/${exp_name}/${pred_file}.txt \
         scripts/eval/miradata/sbatch_single_ckpt.sh \
