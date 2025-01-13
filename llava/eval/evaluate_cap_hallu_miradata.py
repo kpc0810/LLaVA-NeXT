@@ -1,59 +1,29 @@
 # Standard library imports
 import argparse
-import asyncio
 import ast
-import base64
-import copy
 import csv
 import json
 import math
 import os
-import random
-import signal
-import time
-import glob
 import re
-from collections import namedtuple
-from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
-from functools import partial
 import fcntl
 
 # Third-party library imports
-import cv2
 import numpy as np
 import torch
 import torch.distributed as dist
 import transformers
-from PIL import Image
-from decord import VideoReader, cpu
 from tqdm import tqdm
-from transformers import AutoConfig
-from sentence_transformers import SentenceTransformer, util
 
 # Local application/library specific imports
-from llava.constants import (
-    IMAGE_TOKEN_INDEX,
-    DEFAULT_IMAGE_TOKEN,
-    DEFAULT_IM_START_TOKEN,
-    DEFAULT_IM_END_TOKEN
-)
-from llava.conversation import conv_templates, SeparatorStyle
-from llava.datamodule.mira_user_prompt import user_prompts
-from llava.model.builder import load_pretrained_faith_model
-from llava.utils import process_video_with_decord, disable_torch_init, rank_print
-from llava.mm_utils import (
-    process_anyres_image,
-    tokenizer_image_token,
-    get_model_name_from_path,
-    KeywordsStoppingCriteria
-)
+from llava.utils import rank_print
 from llava.model.language_model.faith_llava_qwen import all_gather
 
-import spacy
 from nltk.stem import PorterStemmer
+from gensim.models.fasttext import load_facebook_vectors
+
 stemmer = PorterStemmer()
-nlp = spacy.load("en_core_web_lg")
 
 def split_list(lst, n):
     """Split a list into n (roughly) equal-sized chunks"""
@@ -90,6 +60,7 @@ def get_chunk(lst, n, k):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="calculate nle score for miradata")
+    parser.add_argument("--word_embedding_model_path", required=True, help="The path to word embedding model.")
     parser.add_argument("--pred_data_dir", required=True, help="The path to get/generate prediction file and score file.")
     parser.add_argument("--score_data_dir", required=True, help="The path to get/generate prediction file and score file.")
     parser.add_argument("--test_dataset_path", required=True, help="The path to get parsed object and action words")
@@ -233,8 +204,9 @@ def parse_object_nouns_and_action_verbs_by_llm(model, args, pd, local_rank):
     return object_nouns, action_verbs
 
 class HalluScorer:
-    def __init__(self, data):
+    def __init__(self, data, word_embedding_model_path):
         self.data = data
+        self.embed_model = load_facebook_vectors(word_embedding_model_path)
         self.tfidf_obj, self.tfidf_act = self._build_tfidf_index()
 
     def _build_tfidf_index(self):
@@ -355,23 +327,15 @@ class HalluScorer:
         Calculate the maximum similarity between a predicted word and a list of ground-truth words using SpaCy vectors.
         similarity = cos(θ) = (v1 · v2) / (||v1|| * ||v2||)
         """
-        doc_word = nlp(pred_word)
-        # If the token has no vector (vector_norm=0), return 0.0
-        if doc_word.vector_norm == 0:
-            return 0.0
-        
-        word_vec = doc_word.vector
-        word_vec_norm = doc_word.vector_norm
-
+        pred_word_embed = self.embed_model[pred_word]
+        pred_word_embed_norm = np.linalg.norm(pred_word_embed)
         max_sim = 0.0
         for gt_word in gt_words:
-            doc_gt_word = nlp(gt_word)
-            if doc_gt_word.vector_norm == 0:
-                continue
-            sim = (word_vec @ doc_gt_word.vector) / (word_vec_norm * doc_gt_word.vector_norm)
-            if sim > max_sim:
-                max_sim = sim
-        
+            gt_word_embed = self.embed_model[gt_word]
+            gt_word_embed_norm = np.linalg.norm(gt_word_embed)
+            cos_sim = (pred_word_embed @ gt_word_embed) / (pred_word_embed_norm * gt_word_embed_norm)
+            if cos_sim > max_sim:
+                max_sim = cos_sim
         return max_sim
 
     def one_sample_calculate_chair(self):
@@ -466,13 +430,15 @@ def run_hallu_eval(args):
     world_size = dist.get_world_size()
     torch.cuda.set_device(local_rank)  # This sets the current GPU device to the one corresponding to the local rank
 
-    ## prepare parsed data
+    # =================== #
+    # prepare parsed data #
+    # =================== #
     # load cached parsed data if exists to avoid re-parsing
     os.makedirs(args.score_data_dir, exist_ok=True)
     score_filename, _ = os.path.splitext(os.path.basename(args.score_file))
     parsed_file = f"{score_filename}.parsed_result.json"
     parsed_filepath = os.path.join(args.score_data_dir, parsed_file)
-    
+
     cached_parsed_ids, cached_parsed_data = [], []
     if not os.path.exists(parsed_filepath):
         open(parsed_filepath, "w").close()
@@ -491,11 +457,13 @@ def run_hallu_eval(args):
     
     if args.debug:
         save_every_n_sample = 0
+        pred_data = pred_data[:3]
     else:
         save_every_n_sample = 50
-
+    
     rounds = ['dense', 'main_object', 'background']
-    if pred_data != []:
+    score_path = os.path.join(args.score_data_dir, f"{args.score_file}")
+    if pred_data != [] or not os.path.exists(score_path):  # if the score file does exist, it represents that we have started to evaluate the data before.
         # continue to parse the prediction data 
         model = transformers.pipeline(
             "text-generation",
@@ -528,15 +496,17 @@ def run_hallu_eval(args):
             added_parsed_data.append(sample)
             
             # save
-            if len(added_parsed_data) > save_every_n_sample:
+            if (len(added_parsed_data) > save_every_n_sample) or i == len(pred_data) - 1:
                 with open(parsed_filepath, "a") as f:
                     fcntl.flock(f, fcntl.LOCK_EX)
                     for sample in added_parsed_data:
                         f.write(json.dumps(sample, ensure_ascii=False) + "\n")
                     fcntl.flock(f, fcntl.LOCK_UN)
                 added_parsed_data = []
-    
-    ## calculate hallucination score (parsing is done)
+    dist.barrier()
+    # =============================================== #
+    # calculate hallucination score (parsing is done) #
+    # =============================================== #
     # load relation pair data
     test_data_dict = {}
     with open(args.test_dataset_path, mode='r', encoding='utf-8') as file:
@@ -552,15 +522,28 @@ def run_hallu_eval(args):
     with open(parsed_filepath, "r") as f:
         data = f.readlines()
         data = [json.loads(line) for line in data]
-
-    # add relation pair to each sample
+    
+    # add relation pair to each sample and dispatch them to different GPUs
     for sample in data:
         for round in rounds:
             sample[f'{round}_relation_pair'] = test_data_dict[sample['clip_id']][f'{round}_relation_pair']
+    data = get_chunk(data, world_size, local_rank)
     
-    hallu_scorer = HalluScorer(data)
-    all_scores = {}
+    # load existing scores if exists
+    if os.path.exists(score_path):
+        with open(score_path, 'r') as f:
+            all_scores = json.load(f)
+    else:
+        all_scores = {}
+
+    if args.debug:
+        data = data[:100]
+    
+    # calculate hallucination score
+    hallu_scorer = HalluScorer(data, args.word_embedding_model_path)
     for round in rounds:
+        if round in all_scores:
+            continue
         hallu_eval_dict = {
             'chair_obj': [], 
             'chair_act': [], 
@@ -594,11 +577,27 @@ def run_hallu_eval(args):
             hallu_eval_dict["weighted_coverage_obj"].append(weighted_coverage_obj)
             hallu_eval_dict["weighted_coverage_act"].append(weighted_coverage_act)
         
-        all_scores[round] = hallu_eval_dict
-    
-    score_path = os.path.join(args.score_data_dir, f"{args.score_file}")
-    with open(score_path, 'w') as f:
-        json.dump(all_scores, f, indent=4)
+        # gather the score from all GPUs
+        dist.barrier()
+        all_hallu_eval_dict = all_gather(hallu_eval_dict)
+        gathered_hallu_eval_dict = {}
+        for hallu_eval_dict_per_gpu in all_hallu_eval_dict:
+            for k, v in hallu_eval_dict_per_gpu.items():
+                if k not in gathered_hallu_eval_dict:
+                    gathered_hallu_eval_dict[k] = []
+                gathered_hallu_eval_dict[k].extend(v)
+
+        # save the score (only rank 0)
+        if dist.get_rank() == 0:
+            hallu_eval_dict = {k: np.mean(v) for k, v in gathered_hallu_eval_dict.items()}
+            all_scores[round] = hallu_eval_dict
+            with open(score_path, 'w') as f:
+                json.dump(all_scores, f, indent=4)
+
+            print(f"Round {round}:")
+            for k, v in hallu_eval_dict.items():
+                print(f"{k}: {v:.2f}")
+        dist.barrier()
 
     return
 

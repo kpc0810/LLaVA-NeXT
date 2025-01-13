@@ -1,8 +1,8 @@
 # !/bin/bash
 
 # params required to change
-exp_name="llava-qwen-7b_gl_nnode=8_epo=1_plmlr=1e-4_vtlr=1e-6_bspd=1"
-ckpt_iter=2000
+exp_name="llava-qwen-7b_fcl-ehn_nnode=32_epo=2_plmlr=5e-6_vtlr=1e-6_bspd=1_cplr=1e-4_aslr=1e-4_vcclwt=0.5_tpoclwt=0.25_tpaclwt=0.25"
+ckpt_iter=1000
 
 pred_data_dir="outputs/miradata/pred_results/${exp_name}"
 score_data_dir="outputs/miradata/scores/${exp_name}"
