@@ -13,12 +13,15 @@ import fcntl
 import numpy as np
 import torch
 import torch.distributed as dist
+import deepspeed
+
 import transformers
 from tqdm import tqdm
 
 # Local application/library specific imports
 from llava.utils import rank_print
 from llava.model.language_model.faith_llava_qwen import all_gather
+from llava.utils import rank0_print, rank_print, rank0_breakpoint
 
 from nltk.stem import PorterStemmer
 from gensim.models.fasttext import load_facebook_vectors
@@ -425,7 +428,7 @@ def run_hallu_eval(args):
         args: Command-line arguments.
     """
     # Intialize the distributed environment
-    dist.init_process_group(backend='nccl', timeout=timedelta(seconds=7200000))
+    deepspeed.init_distributed(dist_backend='nccl', timeout=timedelta(seconds=7200000))
     local_rank = dist.get_rank()
     world_size = dist.get_world_size()
     torch.cuda.set_device(local_rank)  # This sets the current GPU device to the one corresponding to the local rank
@@ -528,7 +531,7 @@ def run_hallu_eval(args):
         for round in rounds:
             sample[f'{round}_relation_pair'] = test_data_dict[sample['clip_id']][f'{round}_relation_pair']
     data = get_chunk(data, world_size, local_rank)
-    
+    rank_print(f"length of data: {len(data)}")
     # load existing scores if exists
     if os.path.exists(score_path):
         with open(score_path, 'r') as f:
