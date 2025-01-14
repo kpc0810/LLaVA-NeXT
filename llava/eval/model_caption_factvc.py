@@ -35,31 +35,13 @@ from llava.constants import (
     DEFAULT_IM_END_TOKEN
 )
 from llava.conversation import conv_templates, SeparatorStyle
-from llava.datamodule.mira_user_prompt import user_prompts
 from llava.model.builder import load_pretrained_faith_model
 from llava.utils import process_video_with_decord, disable_torch_init, rank_print
 from llava.mm_utils import (
-    process_anyres_image,
     tokenizer_image_token,
     get_model_name_from_path,
     KeywordsStoppingCriteria
 )
-from urllib.parse import urlparse, parse_qs
-
-def get_youtube_id(url):
-    query = urlparse(url).query
-    return (parse_qs(query)['v'][0]).strip()
-
-
-def load_videomme_data(data_path):
-    raw_data = []
-    for sample in json.load(open(data_path, 'r')):
-        questions = sample.pop("questions")
-        for question in questions:
-            tmp = copy.deepcopy(sample)
-            tmp.update(question)
-            raw_data.append(tmp)
-    return raw_data
 
 
 def split_list(lst, n):
@@ -102,9 +84,9 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # Define the command-line arguments
-    # parser.add_argument("--video_path", help="Path to the video files.", required=True)
-    parser.add_argument("--data-file", help="Path to the data file.", required=False)
-    parser.add_argument("--video_folder", help="Path to the video files.", required=False)
+    parser.add_argument("--data_dir", type=str, default="playground/FactVC/data")
+    # parser.add_argument("--activitynet_video_folder", type=str, default=None)
+    # parser.add_argument("--youcook2_video_folder", type=str, default=None)
     parser.add_argument("--output-dir", help="Directory to save the model results JSON.", required=False)
     parser.add_argument("--output-name", help="Name of the file for storing results JSON.", required=False)
     parser.add_argument("--model-path", type=str, default="facebook/opt-350m")
@@ -125,8 +107,7 @@ def parse_args():
     parser.add_argument("--mm_newline_position", type=str, default="no_token")
     parser.add_argument("--force_sample", type=lambda x: (str(x).lower() == 'true'), default=False)
     parser.add_argument("--add_time_instruction", type=str, default=False)
-    parser.add_argument("--use_subtitle", action="store_true", help="Whether to use subtitle information")
-    parser.add_argument("--subtitle_path", type=str, default="playground/videomme/subtitle_txt", help="Path to the subtitle txt files")
+    parser.add_argument("--question", type=str, default="Please describe this video.")
     
     return parser.parse_args()
 
@@ -208,6 +189,28 @@ def sample_from_vid_with_time_control(video_file, data_args):
         print(f"ERROR: {e}")
         # timeout then return None
         return None
+    
+
+def valid_video_file(file_path):
+    for video_format in (".mp4", ".mkv", ".webm"):
+        tmp = file_path + video_format
+        if os.path.exists(tmp):
+            return tmp
+    return None
+
+  
+def load_factvc_data(args): 
+    full_data = []
+    with open(os.path.join(args.data_dir, "activitynet", "vids.txt"), "r") as f:
+        for line in f:
+            vid = line.strip()
+            full_data.append({"idx": vid, "dataset": "activitynet", "video_file": valid_video_file(os.path.join(args.data_dir, "activitynet", "raw_videos", vid))})
+    with open(os.path.join(args.data_dir, "youcook2", "vids.txt"), "r") as f:
+        for line in f:
+            vid = line.strip()
+            full_data.append({"idx": vid, "dataset": "youcook2", "video_file": valid_video_file(os.path.join(args.data_dir, "youcook2", "raw_videos", vid))})
+    return full_data
+    
 
 def run_inference(args):
     """
@@ -275,7 +278,7 @@ def run_inference(args):
         os.makedirs(args.output_dir)
 
     # Load the whole data, cached caption file, and set output path
-    raw_data = load_videomme_data(args.data_file)
+    raw_data = load_factvc_data(args)
     
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
@@ -284,14 +287,14 @@ def run_inference(args):
         answers_file = open(answers_path, "r")
         cached_data = answers_file.readlines()
         answers_file.close()
-        cached_data = [json.loads(line)["question_id"] for line in cached_data]
+        cached_data = [json.loads(line)["idx"] for line in cached_data]
     else:
         os.makedirs(os.path.dirname(answers_path), exist_ok=True)
         open(answers_path, "w").close()
         cached_data = []
     # cache_set = set([f"{json.loads(line)['video_id']}-{json.loads(line)['clip_id']}" for line in cached_data])
-    data = [sample for sample in raw_data if sample["question_id"] not in cached_data]
-    rank_print(f"Loaded {len(data)} samples from {args.data_file}")
+    data = [sample for sample in raw_data if sample["idx"] not in cached_data]
+    rank_print(f"Loaded {len(data)} samples from {args.data_dir}")
     data = get_chunk(data, world_size, local_rank)
     
     # Temp file for each process
@@ -306,12 +309,9 @@ def run_inference(args):
     for i in tqdm(range(0, len(data))):
         cnt += 1
         sample = data[i]
-        video_id, url = sample["video_id"], sample["url"]
-
-        youtube_id = get_youtube_id(url)
-        video_file = os.path.join(args.video_folder, f"{youtube_id}.mp4")
-        rank_print(f"Captioning from video {video_id}, video name: {video_file}")
-        
+        video_id, video_file = sample["idx"], sample["video_file"]
+    
+        rank_print(f"Captioning from video {video_id}")
         if not os.path.exists(video_file):
             rank_print(f"Video file {video_file} does not exist")
             continue
@@ -325,40 +325,8 @@ def run_inference(args):
 
         time_instruciton = f"The video lasts for {video_time:.2f} seconds, and {num_frames_to_sample} frames are uniformly sampled from it. These frames are located at {frame_time}.Please answer the following questions related to this video."
         
-        # best answer prompt
-        # subtitles_prompt, subtitle = "", ""
-        # if args.use_subtitle:
-        #     subtitles_prompt = "This video's subtitles are listed below:\n"
-        #     option_prompt = "Select the best answer to the following multiple-choice question based on the video and the subtitles. Respond with only the letter (A, B, C, or D) of the correct option."
-        #     with open(os.path.join(args.subtitle_path, f"{youtube_id}.txt"), "r") as f:
-        #         subtitle = f.read()
-        #         subtitle = subtitle + "\n"
-        #     # subtitles_prompt = "[The Start of Reference Text]\n{}\n[The End of Reference Text]"
-
-        # option_prompt = "Select the best answer to the following multiple-choice question based on the video. Respond with only the letter (A, B, C, or D) of the correct option."
-        # question = sample["question"]
-        # option = "\n".join([f"{c}" for _, c in enumerate(sample["choices"])])
-        # question = question + "\n" + option
-        # full_prompt = subtitles_prompt + subtitle + option_prompt + "\n" + question + "\n" + "The best answer is: "
-
-        add_subtitle = ""
-        prompt = "Select the best answer to the following multiple-choice question based on the video{}. Respond with only the letter (A, B, C, or D) of the correct option.\n"
-        prompt += sample["question"] + "\n"
-        prompt += "\n".join(sample["choices"]) + "\n"
-        prompt += "The best answer is:"
-        if args.use_subtitle:
-            subtitles_prompt = "This video's subtitles are listed below:"
-            subtitle_path = os.path.join(args.subtitle_path, f"{youtube_id}.txt")
-            if os.path.exists(subtitle_path):
-                with open(subtitle_path, "r") as f:
-                    subtitle = f.read()
-                if subtitle != "":
-                    prompt = subtitles_prompt + "\n" + subtitle + "\n" + prompt
-                    add_subtitle = " and the subtitles"
-        
-        full_prompt = prompt.format(add_subtitle)
-
-        sample["prompt"] = f'{DEFAULT_IMAGE_TOKEN}\n{full_prompt}'
+        question = args.question
+        sample["prompt"] = f'{DEFAULT_IMAGE_TOKEN}\n{time_instruciton}\n{question}'
 
         conv = copy.deepcopy(conv_templates[args.conv_mode])
         conv.append_message(conv.roles[0], sample["prompt"])
@@ -405,10 +373,6 @@ def run_inference(args):
 
 if __name__ == "__main__":
     args = parse_args()
-    
-    if args.use_subtitle and (args.subtitle_path is None or not os.path.exists(args.subtitle_path)):
-        raise ValueError("subtitle_path is required when use_subtitle is True")
-    
     run_inference(args)
     dist.barrier()
     rank_print("Done!")

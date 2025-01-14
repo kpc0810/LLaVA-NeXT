@@ -54,7 +54,7 @@ enter your huggingface token
 
 ### Download
 required license, already available in ORD
-### Transribe subtitles into .txt format
+### [UPDATED] Transribe subtitles into .txt format
 ```
 bash scripts/pred/generate_videomme_subtitle.sh <video_path> <srt_path> <output_path>
 ```
@@ -71,9 +71,7 @@ bash scripts/pred/videomme.sh
 
 * prompt template:
 ```
-The video's subtitles are listed below:
-{subtitle}
-Select the best answer to the following multiple-choice question based on the video and the subtitles. Respond with the letter (A, B, C, or D) of the correct option and explain your choice.
+Select the best answer to the following multiple-choice question based on the video{ and the subtitles}. Respond with only the letter (A, B, C, or D) of the correct option
 {question}
 A. {choice_A}
 B. {choice_B}
@@ -81,3 +79,72 @@ C. {choice_C}
 D. {choice_D}
 The best answer is:
 ```
+`{ and the subtitles}` will be added to the prompt if you use --use_subtitle.
+
+## VidHal
+
+### Dataset
+directly assess annotation and raw videos in tp1's folder:
+`/mnt/home/kaipoc/research_vh/LLaVA-NeXT/playground/VidHal/vidhal`
+
+### Generate prediction
+```
+bash scripts/pred/vidhal/prediction.sh
+```
+
+### Evaluate score (accuracy)
+```
+bash scripts/pred/vidhal/evaluate.sh <pred_file> <gt_file> (<score_file>)
+```
+* `<score_file>` is optional, if not provided, it will be saved in the same directory as `<pred_file>`.
+* the result with be saved in json file (five different types and overall accuracy).
+
+## FactVC
+
+### Dataset
+directly copy folder `FactVC` in `/mnt/home/kaipoc/research_vh/LLaVA-NeXT/playground/`. The folder must arrange as following:
+```
+FactVC/
+├── data/
+│   ├── activitynet/
+│   │   ├── raw_videos/      # ActivityNet raw videos
+│   │   ├── captions/        # ground-truth and model-generated captions
+│   │   ├── vids.txt         # video ids
+│   │   └── factuality_annotation.json  # human factuality annotation
+│   ├── youcook2/
+│   │   ├── raw_videos/      # YouCook2 raw videos
+│   │   ├── captions/        # ground-truth and model-generated captions
+│   │   ├── vids.txt         # video ids
+│   │   └── factuality_annotation.json  # human factuality annotation
+│   └── extract_frames.py
+├── metric/
+│   ├── clip/
+│   ├── emscore/
+│   └── factvc_corr.py      # code to compute FactVC score and correlation
+└── pretrained_models
+    └── factvc_video.pth    # our pretrained metric model
+```
+* `FactVC` folder include annotations, raw videos and reference captions.
+* In this folder we only use annotation, raw videos and reference captions. Hence, the code in folder `metric` won't be used. The code for computing FactVC score is in `libs`.
+* You can put `FactVC` folder in the directory that you store your raw data and annotation.
+
+### Download (Evaluation model checkpoint, already in FactVC folder)
+```
+gdown --id 1S9T4-XLHMhRt3NW4NRQ3WflmEaEZ_H5I
+```
+
+### Run prediction
+```
+bash scripts/pred/factvc/prediction.sh
+```
+
+### Evaluate score
+```
+bash scripts/pred/factvc/evaluate.sh <pred_file> <data_dir> <save_dir>
+```
+* `<data_dir>` is the path to `FactVC/data`
+* `<save_dir>` is optional, if not provided, it will be saved in the same directory as `<pred_file>`.
+
+### Notice
+* clip used in FactVC is not identical to the OpenAI's clip. Make sure that you use the correct clip codebase.
+* For more information, please refer to `libs/FactVC`.

@@ -46,22 +46,6 @@ from llava.mm_utils import (
 )
 from urllib.parse import urlparse, parse_qs
 
-def get_youtube_id(url):
-    query = urlparse(url).query
-    return (parse_qs(query)['v'][0]).strip()
-
-
-def load_videomme_data(data_path):
-    raw_data = []
-    for sample in json.load(open(data_path, 'r')):
-        questions = sample.pop("questions")
-        for question in questions:
-            tmp = copy.deepcopy(sample)
-            tmp.update(question)
-            raw_data.append(tmp)
-    return raw_data
-
-
 def split_list(lst, n):
     """Split a list into n (roughly) equal-sized chunks"""
     chunk_size = math.ceil(len(lst) / n)  # integer division
@@ -125,8 +109,7 @@ def parse_args():
     parser.add_argument("--mm_newline_position", type=str, default="no_token")
     parser.add_argument("--force_sample", type=lambda x: (str(x).lower() == 'true'), default=False)
     parser.add_argument("--add_time_instruction", type=str, default=False)
-    parser.add_argument("--use_subtitle", action="store_true", help="Whether to use subtitle information")
-    parser.add_argument("--subtitle_path", type=str, default="playground/videomme/subtitle_txt", help="Path to the subtitle txt files")
+    parser.add_argument("--captioning", action="store_true")
     
     return parser.parse_args()
 
@@ -225,6 +208,7 @@ def run_inference(args):
     # Initialize the model
     if "gpt4v" != args.model_path:
         model_name = get_model_name_from_path(args.model_path)
+        print(f"model_name: {model_name}")
         # Set model configuration parameters if they exist
         if args.overwrite == True:
             overwrite_config = {}
@@ -275,7 +259,7 @@ def run_inference(args):
         os.makedirs(args.output_dir)
 
     # Load the whole data, cached caption file, and set output path
-    raw_data = load_videomme_data(args.data_file)
+    raw_data = json.load(open(args.data_file, 'r'))
     
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
@@ -284,13 +268,13 @@ def run_inference(args):
         answers_file = open(answers_path, "r")
         cached_data = answers_file.readlines()
         answers_file.close()
-        cached_data = [json.loads(line)["question_id"] for line in cached_data]
+        cached_data = [json.loads(line)["video"] for line in cached_data]
     else:
         os.makedirs(os.path.dirname(answers_path), exist_ok=True)
         open(answers_path, "w").close()
         cached_data = []
     # cache_set = set([f"{json.loads(line)['video_id']}-{json.loads(line)['clip_id']}" for line in cached_data])
-    data = [sample for sample in raw_data if sample["question_id"] not in cached_data]
+    data = [sample for sample in raw_data if sample["video"] not in cached_data]
     rank_print(f"Loaded {len(data)} samples from {args.data_file}")
     data = get_chunk(data, world_size, local_rank)
     
@@ -306,10 +290,9 @@ def run_inference(args):
     for i in tqdm(range(0, len(data))):
         cnt += 1
         sample = data[i]
-        video_id, url = sample["video_id"], sample["url"]
 
-        youtube_id = get_youtube_id(url)
-        video_file = os.path.join(args.video_folder, f"{youtube_id}.mp4")
+        video_id = sample["video"]
+        video_file = os.path.join(args.video_folder, f"{video_id}.mp4")
         rank_print(f"Captioning from video {video_id}, video name: {video_file}")
         
         if not os.path.exists(video_file):
@@ -325,40 +308,57 @@ def run_inference(args):
 
         time_instruciton = f"The video lasts for {video_time:.2f} seconds, and {num_frames_to_sample} frames are uniformly sampled from it. These frames are located at {frame_time}.Please answer the following questions related to this video."
         
-        # best answer prompt
-        # subtitles_prompt, subtitle = "", ""
-        # if args.use_subtitle:
-        #     subtitles_prompt = "This video's subtitles are listed below:\n"
-        #     option_prompt = "Select the best answer to the following multiple-choice question based on the video and the subtitles. Respond with only the letter (A, B, C, or D) of the correct option."
-        #     with open(os.path.join(args.subtitle_path, f"{youtube_id}.txt"), "r") as f:
-        #         subtitle = f.read()
-        #         subtitle = subtitle + "\n"
-        #     # subtitles_prompt = "[The Start of Reference Text]\n{}\n[The End of Reference Text]"
+        prompt, question = "", ""
+        if args.captioning:
+            captioning_prompt = f'{DEFAULT_IMAGE_TOKEN}\n{time_instruciton}\nPlease describe this video.'
+            conv = copy.deepcopy(conv_templates[args.conv_mode])
+            conv.append_message(conv.roles[0], captioning_prompt)
+            conv.append_message(conv.roles[1], None)
+            captioning_prompt = conv.get_prompt()
+            input_ids = tokenizer_image_token(captioning_prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors="pt").unsqueeze(0).cuda(local_rank)
+            if tokenizer.pad_token_id is None:
+                if "qwen" in tokenizer.name_or_path.lower():
+                    rank_print("Setting pad token to bos token for qwen model.")
+                    tokenizer.pad_token_id = 151643
+            attention_masks = input_ids.ne(tokenizer.pad_token_id).long().cuda(local_rank)
+            stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
+            keywords = [stop_str]
+            stopping_criteria = KeywordsStoppingCriteria(keywords, tokenizer, input_ids)
 
-        # option_prompt = "Select the best answer to the following multiple-choice question based on the video. Respond with only the letter (A, B, C, or D) of the correct option."
-        # question = sample["question"]
-        # option = "\n".join([f"{c}" for _, c in enumerate(sample["choices"])])
-        # question = question + "\n" + option
-        # full_prompt = subtitles_prompt + subtitle + option_prompt + "\n" + question + "\n" + "The best answer is: "
-
-        add_subtitle = ""
-        prompt = "Select the best answer to the following multiple-choice question based on the video{}. Respond with only the letter (A, B, C, or D) of the correct option.\n"
-        prompt += sample["question"] + "\n"
-        prompt += "\n".join(sample["choices"]) + "\n"
-        prompt += "The best answer is:"
-        if args.use_subtitle:
-            subtitles_prompt = "This video's subtitles are listed below:"
-            subtitle_path = os.path.join(args.subtitle_path, f"{youtube_id}.txt")
-            if os.path.exists(subtitle_path):
-                with open(subtitle_path, "r") as f:
-                    subtitle = f.read()
-                if subtitle != "":
-                    prompt = subtitles_prompt + "\n" + subtitle + "\n" + prompt
-                    add_subtitle = " and the subtitles"
+            output_ids = model.module.generate(inputs=input_ids, images=video, attention_mask=attention_masks, modalities="video", do_sample=False, max_new_tokens=1024 ,num_beams=1,use_cache=True, stopping_criteria=[stopping_criteria])
+            video_caption = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip().rstrip(stop_str).strip()
+            
+            prompt = "You are provided with a video, a pre-generated caption that describes the video and a set of several captions. " \
+                     "Your task is to carefully watch the video, consider the pre-generated caption provided, " \
+                     "and select the caption from the options that best aligns with both the video and the pre-generated caption. " \
+                     "Provide your answer only as a single letter representing the option whose caption best describes the video, without any explanation." \
+                     f"\nThe video's pre-generated caption is listed below:\n{video_caption}"
+                     
+            question = "Watch the video provided, refer to the pre-generated caption, " \
+                       "and choose the option whose caption most accurately describes the video while aligning with the pre-generated caption.\n"
+        else:
+            prompt = "You are provided with a video and a set of several captions. " \
+                     "Your task is to watch the video provided carefully, and select the caption that best describes the video. " \
+                     "Provide your answer only as a single letter representing the option whose caption that best describes the video, without any explanation."
+            question = "Watch the video provided, and choose the option whose caption describes the video most accurately.\n"
         
-        full_prompt = prompt.format(add_subtitle)
-
-        sample["prompt"] = f'{DEFAULT_IMAGE_TOKEN}\n{full_prompt}'
+        key_order = list(sample["captions"].keys())
+        random.shuffle(key_order)
+        
+        options = []
+        ans = None
+        for idx, key in enumerate(key_order):
+            option_letter = chr(65 + idx)  # A, B, C etc.
+            options.append(f"{option_letter}. {sample['captions'][key]}")
+            if key == "1":  # Track correct answer
+                ans = option_letter
+        sample["answer"] = ans
+        sample["captions"] = options
+                
+        # Combine into final prompt
+        question += "\n".join(options)
+        full_prompt = f"{prompt}\n{question}\nThe best answer is:"
+        sample["prompt"] = f'{DEFAULT_IMAGE_TOKEN}\n{time_instruciton}\n{full_prompt}'
 
         conv = copy.deepcopy(conv_templates[args.conv_mode])
         conv.append_message(conv.roles[0], sample["prompt"])
@@ -375,6 +375,7 @@ def run_inference(args):
         stopping_criteria = KeywordsStoppingCriteria(keywords, tokenizer, input_ids)
 
         output_ids = model.module.generate(inputs=input_ids, images=video, attention_mask=attention_masks, modalities="video", do_sample=False, max_new_tokens=1024 ,num_beams=1,use_cache=True, stopping_criteria=[stopping_criteria])
+        outputs = ""
         outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip().rstrip(stop_str).strip()
         
         # save prediction and gt captions, while pop the unneeded elements
@@ -405,9 +406,6 @@ def run_inference(args):
 
 if __name__ == "__main__":
     args = parse_args()
-    
-    if args.use_subtitle and (args.subtitle_path is None or not os.path.exists(args.subtitle_path)):
-        raise ValueError("subtitle_path is required when use_subtitle is True")
     
     run_inference(args)
     dist.barrier()
