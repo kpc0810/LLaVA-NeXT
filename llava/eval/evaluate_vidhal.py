@@ -7,16 +7,18 @@ from collections import defaultdict
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--pred_file", type=str, default="outputs/vidhal/pred_result/test_1231_1.jsonl")
-    parser.add_argument("--gt_file", type=str, default="playground/VidHal/vidhal/annotations.json")
-    # parser.add_argument("--score_file", type=str, default="outputs/vidhal/score.json")
-    parser.add_argument("--score_file", type=str, default=None)
+    parser.add_argument("--pred_data_dir", type=str, required=True)
+    parser.add_argument("--score_data_dir", type=str, required=True)
+    parser.add_argument("--pred_file", type=str, required=True)
+    parser.add_argument("--score_file", type=str, required=True)
+    parser.add_argument("--gt_file", type=str, required=True)
     return parser.parse_args()
 
 def main(args):
     
     result = defaultdict(list)
     fail_case = defaultdict(int)
+    args.pred_file = os.path.join(args.pred_data_dir, args.pred_file)
     
     pred_data = {}
     with open(args.pred_file, "r") as f:
@@ -65,13 +67,8 @@ def main(args):
     print(table)
     
     # Save the table to a file
-    try:
-        save_dir = os.path.dirname(args.score_file)
-        os.makedirs(save_dir, exist_ok=True)
-        score_file = args.score_file
-    except :
-        score_file = args.pred_file.replace(".jsonl", "_score.json")
-        
+    os.makedirs(args.score_data_dir, exist_ok=True)
+    score_file = os.path.join(args.score_data_dir, args.score_file)
     with open(score_file, 'w') as f:
         json.dump(out, f, indent=4)
     

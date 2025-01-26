@@ -24,6 +24,7 @@ def plot_metric(metric_name, scores, output_dir, exp_name):
 def main(exp_name):
     score_data_dir = os.path.join("outputs/miradata/scores/", exp_name)
     score_data_paths = glob.glob(os.path.join(score_data_dir, "score_*.json"))
+    score_data_paths = [filename for filename in score_data_paths if "parsed_result" not in filename]
     score_data_paths = sorted(score_data_paths, key=lambda x: int(x.split('_')[-1].split('.')[0].strip('[]')))
     
     all_scores = {}
@@ -50,6 +51,6 @@ def main(exp_name):
             plot_metric(metric, metric_scores, vis_dir, exp_name)
 
 if __name__ =="__main__":
-    exp_name = "llava-qwen-7b_fcl-ehn_nnode=32_epo=2_plmlr=5e-6_vtlr=1e-6_bspd=1_cplr=1e-4_aslr=1e-4_vcclwt=0.5_tpoclwt=0.25_tpaclwt=0.25"  # This is the only one param need to be changed
+    exp_name = "llava-qwen-7b_fcl_nnode=32_epo=2_plmlr=5e-6_vtlr=1e-6_bspd=1_cplr=1e-4_aslr=1e-4_vcclwt=0.5_tpoclwt=0.25_tpaclwt=0.25"  # This is the only one param need to be changed
     main(exp_name)
     print(f"Done for {exp_name}!")

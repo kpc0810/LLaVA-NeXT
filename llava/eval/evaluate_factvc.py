@@ -10,12 +10,17 @@ from libs.FactVC.facvc_scorer import get_caption, get_factvc_score
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description='Compute correlation between FactVC and factuality annotation')
-    parser.add_argument('--pred_file', type=str, default="outputs/factvc/pred_result/llava_video_test_0104_1.jsonl")
+    parser.add_argument('--pred_data_dir', type=str, required=True)
+    parser.add_argument('--score_data_dir', type=str, required=True)
+    parser.add_argument('--score_file', type=str, required=True)
+    parser.add_argument('--pred_file', type=str, required=True)
     parser.add_argument('--data_dir', type=str, default="playground/FactVC/data")
     parser.add_argument('--dataset', type=str, default='activitynet', choices=['activitynet', 'youcook2', 'all'])
-    parser.add_argument('--save_dir', type=str, default=None)
     args = parser.parse_args()
 
+    # rename args for lazy modification
+    args.pred_file = os.path.join(args.pred_data_dir, args.pred_file)
+    
     inference_type = args.dataset
     if inference_type == 'all':
         dataset_list = ['activitynet', 'youcook2']
@@ -56,14 +61,8 @@ if __name__ == '__main__':
     if inference_type == "all":
         result["all"] = overall
     
-    if args.save_dir is None:
-        save_dir = os.path.dirname(args.pred_file)
-    else:
-        save_dir = args.save_dir
-
-    os.makedirs(save_dir, exist_ok=True)
-    save_file = f"{save_dir}/{os.path.basename(args.pred_file).split('.')[0]}_result_{inference_type}.json"
-    print(f"Save result to {save_file}")
-    with open(save_file, "w") as f:
+    os.makedirs(args.score_data_dir, exist_ok=True)
+    score_filepath = os.path.join(args.score_data_dir, args.score_file)
+    with open(score_filepath, "w") as f:
         json.dump(result, f, indent=4)
 

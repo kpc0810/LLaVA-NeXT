@@ -187,7 +187,7 @@ def postprocess(text):
 
 
 def parse_object_nouns_and_action_verbs_by_llm(model, args, pd, local_rank):
-    max_retry, cur_retry = 5, 0
+    max_retry, cur_retry = 3, 0
     while cur_retry < max_retry:
         print("Try to parse object and action verbs by llm in %d times"%cur_retry)
         response = process_one_sample(pd, model)
@@ -332,11 +332,17 @@ class HalluScorer:
         """
         pred_word_embed = self.embed_model[pred_word]
         pred_word_embed_norm = np.linalg.norm(pred_word_embed)
+        print(f"pred_word = {pred_word}, gt_words = {gt_words}")
+        if pred_word_embed_norm == 0:
+            return 0.0
         max_sim = 0.0
         for gt_word in gt_words:
             gt_word_embed = self.embed_model[gt_word]
             gt_word_embed_norm = np.linalg.norm(gt_word_embed)
-            cos_sim = (pred_word_embed @ gt_word_embed) / (pred_word_embed_norm * gt_word_embed_norm)
+            if gt_word_embed_norm == 0:
+                cos_sim = 0.0
+            else:
+                cos_sim = (pred_word_embed @ gt_word_embed) / (pred_word_embed_norm * gt_word_embed_norm)
             if cos_sim > max_sim:
                 max_sim = cos_sim
         return max_sim
@@ -593,6 +599,11 @@ def run_hallu_eval(args):
         # save the score (only rank 0)
         if dist.get_rank() == 0:
             hallu_eval_dict = {k: np.mean(v) for k, v in gathered_hallu_eval_dict.items()}
+            hallu_eval_dict["f1_act"] = 2 * (1-hallu_eval_dict["chair_act"]) * hallu_eval_dict["coverage_act"] / (1-hallu_eval_dict["chair_act"] + hallu_eval_dict["coverage_act"])
+            hallu_eval_dict["f1_obj"] = 2 * (1-hallu_eval_dict["chair_obj"]) * hallu_eval_dict["coverage_obj"] / (1-hallu_eval_dict["chair_obj"] + hallu_eval_dict["coverage_obj"])
+            hallu_eval_dict["weighted_f1_act"] = 2 * (1-hallu_eval_dict["weighted_chair_act"]) * hallu_eval_dict["weighted_coverage_act"] / (1-hallu_eval_dict["weighted_chair_act"] + hallu_eval_dict["weighted_coverage_act"])
+            hallu_eval_dict["weighted_f1_obj"] = 2 * (1-hallu_eval_dict["weighted_chair_obj"]) * hallu_eval_dict["weighted_coverage_obj"] / (1-hallu_eval_dict["weighted_chair_obj"] + hallu_eval_dict["weighted_coverage_obj"])
+
             all_scores[round] = hallu_eval_dict
             with open(score_path, 'w') as f:
                 json.dump(all_scores, f, indent=4)

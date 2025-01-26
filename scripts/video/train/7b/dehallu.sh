@@ -47,6 +47,7 @@ export NCCL_CUMEM_ENABLE=0
 export NCCL_P2P_DISABLE=1
 # export NCCL_SHM_DISABLE=1
 # export NCCL_IB_TIMEOUT=22
+export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 
 master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 port=$(( ( $SLURM_JOB_ID % 10000 ) + 20000 ))

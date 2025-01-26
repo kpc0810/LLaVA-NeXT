@@ -4,8 +4,6 @@
 #SBATCH --time=4:00:00
 #SBATCH --account=nvr_taiwan_rvos
 #SBATCH --partition=polar4,polar3,polar2,polar,batch_block1,grizzly,batch_block2,batch_block3
-#SBATCH --dependency=singleton
-#SBATCH --exclusive
 #SBATCH --signal=B:SIGUSR1@90
 
 EXP_NAME=${1}

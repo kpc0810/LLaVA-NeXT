@@ -42,10 +42,10 @@ output_dir="/home/kaipoc/personal/research_vh/LLaVA-NeXT/checkpoints/exps/debug"
 dehallu_finetune=True
 cp_lr=1e-4
 as_lr=1e-4
-vccl_wt=1.0
-tpocl_wt=1.0
-tpacl_wt=1.0
-use_hard_neg=True
+vccl_wt=0.5
+tpocl_wt=0.25
+tpacl_wt=0.25
+use_hard_neg=False
 
 echo "master ip: ${master_addr}"
 echo "master port: ${port}"
